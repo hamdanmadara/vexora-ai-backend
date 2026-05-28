@@ -1,0 +1,49 @@
+{
+  "name": "vexora-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vexora AI sales chatbot backend — Express + Mastra + Supabase pgvector + Google Calendar",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "migrate": "tsx scripts/migrate.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^3.0.64",
+    "@mastra/core": "^1.35.0",
+    "@mastra/memory": "^1.18.2",
+    "@mastra/pg": "^1.11.0",
+    "@mastra/rag": "^2.2.1",
+    "ai": "^6.0.185",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "googleapis": "^144.0.0",
+    "mammoth": "^1.8.0",
+    "multer": "^2.1.1",
+    "openai": "^4.73.0",
+    "pdf-parse": "^1.1.1",
+    "pg": "^8.13.1",
+    "pino": "^9.5.0",
+    "pino-http": "^10.3.0",
+    "pino-pretty": "^11.3.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.9.0",
+    "@types/pdf-parse": "^1.1.4",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
