@@ -21,7 +21,7 @@ const IANA_IN_TEXT =
 
 export function extractTimezoneFromText(message: string): string | null {
   const ianaMatch = message.match(IANA_IN_TEXT);
-  if (ianaMatch) {
+  if (ianaMatch?.[1]) {
     try {
       Intl.DateTimeFormat(undefined, { timeZone: ianaMatch[1] });
       return ianaMatch[1];

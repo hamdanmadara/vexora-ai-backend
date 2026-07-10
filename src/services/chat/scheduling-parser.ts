@@ -72,7 +72,7 @@ function zonedWeekday(date: Date, timeZone: string): number {
 export function extractMeetingDurationMin(message: string): number | null {
   const m = message.match(/\b(\d{1,3})\s*[-\s]?\s*(minute|min|mins)\b/i);
   if (m) {
-    const n = parseInt(m[1], 10);
+    const n = parseInt(m[1]!, 10);
     if (n >= 15 && n <= 120) return n;
   }
   if (/\b45\s*min|\b45[- ]minute/i.test(message)) return 45;
@@ -202,8 +202,8 @@ export function parseExplicitCalendarDate(
 
   const dm = message.match(DAY_THEN_MONTH_RE);
   if (dm) {
-    const day = parseInt(dm[1], 10);
-    const month = monthIndex(dm[2]);
+    const day = parseInt(dm[1]!, 10);
+    const month = monthIndex(dm[2]!);
     if (month && day >= 1 && day <= 31) {
       return {
         year: explicitYear ?? resolveYearForDate(month, day, now, timeZone),
@@ -215,8 +215,8 @@ export function parseExplicitCalendarDate(
 
   const md = message.match(MONTH_THEN_DAY_RE);
   if (md) {
-    const month = monthIndex(md[1]);
-    const day = parseInt(md[2], 10);
+    const month = monthIndex(md[1]!);
+    const day = parseInt(md[2]!, 10);
     if (month && day >= 1 && day <= 31) {
       return {
         year: explicitYear ?? resolveYearForDate(month, day, now, timeZone),
@@ -228,8 +228,8 @@ export function parseExplicitCalendarDate(
 
   const slash = message.match(SLASH_DATE_RE);
   if (slash) {
-    const a = parseInt(slash[1], 10);
-    const b = parseInt(slash[2], 10);
+    const a = parseInt(slash[1]!, 10);
+    const b = parseInt(slash[2]!, 10);
     let day: number;
     let month: number;
     if (a > 12) {
@@ -261,9 +261,9 @@ export function extractTimeFromMessage(
 ): { hour: number; minute: number } | null {
   const timeMatch = message.match(TIME_RE);
   if (timeMatch) {
-    let hour = parseInt(timeMatch[1], 10);
+    let hour = parseInt(timeMatch[1]!, 10);
     const minute = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
-    const ampm = timeMatch[3].toLowerCase();
+    const ampm = timeMatch[3]!.toLowerCase();
     if (ampm === "pm" && hour < 12) hour += 12;
     if (ampm === "am" && hour === 12) hour = 0;
     return { hour, minute };

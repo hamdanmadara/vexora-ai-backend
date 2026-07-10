@@ -18,8 +18,7 @@ import { isSchedulingContinuation } from "./scheduling-intent";
 
 function formatAlternativeSlots(
   slots: { start: string; end: string }[],
-  tz: string,
-  durationMin: number
+  tz: string
 ): string {
   return slots
     .map((s, i) => {
@@ -107,7 +106,7 @@ export async function tryAutoBookMeeting(args: {
         lines.push(
           "",
           "Here are open times the same week — reply with 1, 2, or 3:",
-          formatAlternativeSlots(alternatives, tz, durationMin)
+          formatAlternativeSlots(alternatives, tz)
         );
       }
       return lines.join("\n");
@@ -128,7 +127,7 @@ export async function tryAutoBookMeeting(args: {
         lines.push(
           "",
           "Here are the next available weekday times — reply with 1, 2, or 3:",
-          formatAlternativeSlots(alternatives, tz, durationMin)
+          formatAlternativeSlots(alternatives, tz)
         );
       } else {
         lines.push(
@@ -164,7 +163,7 @@ export async function tryAutoBookMeeting(args: {
         lines.push(
           "",
           "Here are nearby open times — reply with 1, 2, or 3:",
-          formatAlternativeSlots(alternatives, tz, durationMin)
+          formatAlternativeSlots(alternatives, tz)
         );
       } else {
         lines.push(

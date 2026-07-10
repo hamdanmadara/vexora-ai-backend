@@ -33,13 +33,13 @@ export function normalizeAssistantText(text: string): string {
   for (let i = 0; i < emails.length; i++) {
     out = out.replace(
       PH_START + String.fromCharCode(0xe100 + i),
-      emails[i]
+      emails[i]!
     );
   }
   for (let i = 0; i < urls.length; i++) {
     out = out.replace(
       PH_START + String.fromCharCode(0xe200 + i),
-      urls[i]
+      urls[i]!
     );
   }
 

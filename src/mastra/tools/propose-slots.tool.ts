@@ -43,13 +43,6 @@ const inputSchema = z.object({
     .describe(
       "Chat session id — used to show slot times in the customer's timezone when known."
     ),
-  durationMin: z
-    .number()
-    .int()
-    .min(15)
-    .max(120)
-    .optional()
-    .describe("Meeting length in minutes (default from lead or 30)."),
 });
 
 const outputSchema = z.object({
