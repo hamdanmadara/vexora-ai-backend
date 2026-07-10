@@ -27,9 +27,8 @@
     "sourceMap": true,
     "removeComments": false,
 
-    "baseUrl": "./src",
     "paths": {
-      "@/*": ["*"]
+      "@/*": ["./src/*"]
     }
   },
   "tsc-alias": {
