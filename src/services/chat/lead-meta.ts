@@ -1,6 +1,9 @@
 import type { LeadRow } from "@/services/lead/lead.service";
 import { extractTimezoneFromText } from "@/utils/timezone";
-import { extractMeetingDurationMin } from "./scheduling-parser";
+import {
+  extractMeetingDurationMin,
+  extractTimeFromMessage,
+} from "./scheduling-parser";
 
 export interface LeadMeta {
   /** Number of user messages in this session. */
@@ -15,6 +18,15 @@ export interface LeadMeta {
   salesIntent?: boolean;
   /** Last topic the user asked about (avoids "yes do it" → wrong agent). */
   pendingTopic?: "pricing" | "meeting" | "products" | null;
+  /** Last time of day the customer asked for (e.g. 5 PM), reused on follow-ups. */
+  preferredMeetingHour?: number;
+  preferredMeetingMinute?: number;
+  /** Customer asked about pricing/cost at some point (buying signal). */
+  pricingAsked?: boolean;
+  /** Turn number when we last offered a call (avoid re-pestering). */
+  callOfferTurn?: number;
+  /** Customer declined a call offer — never pitch again unless they ask. */
+  callDeclined?: boolean;
 }
 
 const DEFAULT_META: LeadMeta = { userTurns: 0, meetingOffered: false };
@@ -42,6 +54,20 @@ export function parseLeadMeta(notes: string | null): LeadMeta {
         parsed.pendingTopic === "products"
           ? parsed.pendingTopic
           : undefined,
+      preferredMeetingHour:
+        typeof parsed.preferredMeetingHour === "number"
+          ? parsed.preferredMeetingHour
+          : undefined,
+      preferredMeetingMinute:
+        typeof parsed.preferredMeetingMinute === "number"
+          ? parsed.preferredMeetingMinute
+          : undefined,
+      pricingAsked: !!parsed.pricingAsked,
+      callOfferTurn:
+        typeof parsed.callOfferTurn === "number"
+          ? parsed.callOfferTurn
+          : undefined,
+      callDeclined: !!parsed.callDeclined,
     };
   } catch {
     return { ...DEFAULT_META };
@@ -71,8 +97,24 @@ export function mergeMeetingDuration(meta: LeadMeta, message: string): LeadMeta 
   return meta;
 }
 
+/** Remember 5 PM (etc.) for follow-ups like "tomorrow" without repeating the time. */
+export function mergePreferredMeetingTime(
+  meta: LeadMeta,
+  message: string
+): LeadMeta {
+  const t = extractTimeFromMessage(message);
+  if (t) {
+    meta.preferredMeetingHour = t.hour;
+    meta.preferredMeetingMinute = t.minute;
+  }
+  return meta;
+}
+
 const INTEREST_RE =
   /\b(interested|i'?m interested|want a demo|like to learn more|tell me more|sounds interesting)\b/i;
+
+const PUBLISH_INTENT_RE =
+  /\b(publish(ing)?(\s+my)?\s+book|self[- ]?publish|want to publish)\b/i;
 
 const PRICING_TOPIC_RE =
   /\b(pricing|price|plans?|subscription|cost|how much)\b/i;
@@ -84,36 +126,82 @@ export function mergeConversationTopic(meta: LeadMeta, message: string): LeadMet
   const trimmed = message.trim();
   if (PRICING_TOPIC_RE.test(trimmed) || PRICING_FOLLOWUP_RE.test(trimmed)) {
     meta.pendingTopic = "pricing";
+    meta.pricingAsked = true;
   }
-  if (INTEREST_RE.test(trimmed)) {
+  if (INTEREST_RE.test(trimmed) || PUBLISH_INTENT_RE.test(trimmed)) {
     meta.salesIntent = true;
     meta.pendingTopic = "meeting";
+    meta.callDeclined = false;
   }
   if (EXPLICIT_CALL_REQUEST_RE.test(trimmed)) {
     meta.salesIntent = true;
     meta.pendingTopic = "meeting";
     meta.meetingOffered = true;
+    meta.callDeclined = false;
   }
   return meta;
 }
 
+/** "no thanks / not now / just looking" right after we offered a call. */
+export const CALL_DECLINE_RE =
+  /\b(no thanks?|not (now|yet|really|interested|at the moment)|maybe later|just (looking|browsing|curious)|i'?ll (think|get back)|not right now|some other time)\b/i;
+
+/**
+ * If the customer turns down the call offer, remember it and stop pitching.
+ * An explicit "book a call" / "I'm interested" later re-opens (handled in
+ * mergeConversationTopic which clears callDeclined).
+ */
+export function mergeCallDecline(meta: LeadMeta, message: string): LeadMeta {
+  const trimmed = message.trim();
+  if (!CALL_DECLINE_RE.test(trimmed)) return meta;
+  if (EXPLICIT_CALL_REQUEST_RE.test(trimmed)) return meta;
+  if (!meta.meetingOffered && meta.pendingTopic !== "meeting") return meta;
+  meta.callDeclined = true;
+  meta.meetingOffered = false;
+  meta.salesIntent = false;
+  meta.pendingTopic = null;
+  return meta;
+}
+
+/**
+ * Decide whether the knowledge agent may add its one-line call invite this
+ * turn. Philosophy: behave like a good human rep — answer first, read the
+ * room, and only suggest a call once the customer is clearly engaged.
+ */
 export function shouldKnowledgeOfferCall(
   meta: LeadMeta,
   message: string
 ): boolean {
   const trimmed = message.trim();
 
+  // They said no — never pitch again (explicit interest clears the flag).
+  if (meta.callDeclined) return false;
+
   if (EXPLICIT_CALL_REQUEST_RE.test(trimmed)) return true;
 
+  // Customer states interest in their own words → offer right away.
   if (INTEREST_RE.test(trimmed) && meta.userTurns >= 1) return true;
 
-  // Strong commercial intent — ok to offer after first answer.
-  if (STRONG_BUYING_RE.test(trimmed)) return true;
+  // Otherwise require a real conversation first: at least 3 customer turns
+  // AND an accumulated buying signal (they asked about pricing at some point,
+  // or this turn carries commercial/soft-interest language).
+  const engaged =
+    meta.userTurns >= 3 &&
+    (meta.pricingAsked ||
+      STRONG_BUYING_RE.test(trimmed) ||
+      SOFT_INTEREST_RE.test(trimmed));
+  if (!engaged) return false;
 
-  // Deeper conversation (3+ user messages) + soft interest signals.
-  if (meta.userTurns >= 2 && SOFT_INTEREST_RE.test(trimmed)) return true;
+  // Don't re-pester: if we offered recently and they didn't bite, wait
+  // at least 4 more turns before gently suggesting again.
+  if (
+    meta.callOfferTurn != null &&
+    meta.userTurns - meta.callOfferTurn < 4
+  ) {
+    return false;
+  }
 
-  return false;
+  return true;
 }
 
 /** Customer explicitly wants to talk / schedule. */

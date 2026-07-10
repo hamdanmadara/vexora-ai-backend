@@ -139,5 +139,50 @@ assert(
   }) != null
 );
 
+assert(
+  "day after tomorrow 5pm parses",
+  parsePreferredMeetingTime({
+    message: "5 pm day after tomorrow",
+    timeZone: "Asia/Karachi",
+    durationMin: 30,
+    now: new Date("2026-05-20T12:00:00Z"),
+  }) != null
+);
+
+const may30 = parsePreferredMeetingTime({
+  message: "Please schedule a call on 30 may, 5pm pakistan time",
+  timeZone: "Asia/Karachi",
+  durationMin: 30,
+  now: new Date("2026-05-28T10:00:00Z"),
+});
+assert("30 may 5pm parses", may30 != null);
+assert(
+  "30 may is future when today is 28 may",
+  may30 != null && new Date(may30.startTime) > new Date("2026-05-28T10:00:00Z")
+);
+
+const may29FollowUp = parsePreferredMeetingTime({
+  message: "Do it on tomorrow then 29 may",
+  timeZone: "Asia/Karachi",
+  durationMin: 30,
+  now: new Date("2026-05-28T12:00:00Z"),
+  preferredTime: { hour: 17, minute: 0 },
+});
+assert("tomorrow/29 may without 5pm still parses", may29FollowUp != null);
+assert(
+  "29 may is not in the past on 28 may",
+  may29FollowUp != null &&
+    new Date(may29FollowUp.startTime) > new Date("2026-05-28T12:00:00Z")
+);
+
+assert(
+  "contact with email routes scheduler after offer",
+  routeToAgent(
+    "Muhammad Rayyan\nhamdan@test.com\nPakistan time",
+    lead({ status: "new", name: null, email: null }),
+    { userTurns: 3, meetingOffered: true }
+  ).id === "scheduler"
+);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

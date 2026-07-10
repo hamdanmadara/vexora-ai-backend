@@ -19,7 +19,8 @@ export interface FreeSlot {
 
 const DEFAULT_DURATION_MIN = 30;
 const SLOT_GRANULARITY_MIN = 30;
-const WORK_HOUR_START = 9;
+/** Sales rep local hours (inclusive start, end at :00). Start 8 covers ~5 PM Pakistan ≈ 8 AM US Eastern. */
+const WORK_HOUR_START = 8;
 const WORK_HOUR_END = 18;
 
 function addMinutes(date: Date, minutes: number): Date {
@@ -54,6 +55,20 @@ function overlapsBusy(
     const be = new Date(b.end);
     return start < be && end > bs;
   });
+}
+
+export type SlotRejectionReason = "past" | "weekend" | "outside_hours";
+
+export function getSlotRejectionReason(
+  start: Date,
+  end: Date,
+  now: Date = new Date()
+): SlotRejectionReason | null {
+  const tz = getSalesTimezone();
+  if (start <= now) return "past";
+  if (!isWeekdayInTimezone(start, tz)) return "weekend";
+  if (!isWorkingSlot(start, end, now, tz)) return "outside_hours";
+  return null;
 }
 
 function isWorkingSlot(start: Date, end: Date, now: Date, tz: string): boolean {
@@ -120,10 +135,8 @@ export async function isTimeSlotAvailable(args: {
 }): Promise<boolean> {
   const start = new Date(args.startTime);
   const end = new Date(args.endTime);
-  const tz = getSalesTimezone();
-  const now = new Date();
 
-  if (!isWorkingSlot(start, end, now, tz)) return false;
+  if (getSlotRejectionReason(start, end)) return false;
 
   const busy = await fetchBusyPeriods(
     args.salesRepId,

@@ -1,9 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { embedTexts } from "@/services/document/embedder";
-import { ensureKnowledgeIndex, getVectorStore } from "@/mastra/vector";
+import { searchKnowledge } from "@/services/chat/rag-context.service";
 import { env } from "@/config/env";
-import { logger } from "@/utils/logger";
 
 const inputSchema = z.object({
   query: z
@@ -40,32 +38,7 @@ export const searchKnowledgeTool = createTool({
   outputSchema,
   execute: async (inputData) => {
     const { query, topK } = inputData;
-    try {
-      await ensureKnowledgeIndex();
-      const [embedding] = await embedTexts([query]);
-      if (!embedding) return { results: [] };
-
-      const store = getVectorStore();
-      const hits = await store.query({
-        indexName: env.KNOWLEDGE_INDEX_NAME,
-        queryVector: embedding,
-        topK: topK ?? env.RAG_TOP_K,
-      });
-
-      const results = hits.map((h) => {
-        const meta = (h.metadata ?? {}) as Record<string, unknown>;
-        return {
-          text: String(meta.text ?? ""),
-          source: typeof meta.source === "string" ? meta.source : null,
-          documentId:
-            typeof meta.documentId === "string" ? meta.documentId : null,
-          score: typeof h.score === "number" ? h.score : 0,
-        };
-      });
-      return { results };
-    } catch (err) {
-      logger.error({ err, query }, "Knowledge search failed");
-      return { results: [] };
-    }
+    const results = await searchKnowledge(query, topK ?? env.RAG_TOP_K);
+    return { results };
   },
 });

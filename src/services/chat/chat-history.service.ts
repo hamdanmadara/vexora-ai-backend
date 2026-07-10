@@ -132,12 +132,15 @@ export async function ensureSessionThread(sessionId: string): Promise<void> {
     const memory = getMemory();
     const existing = await memory.getThreadById({ threadId: sessionId });
     if (existing) return;
+    const now = new Date();
     await memory.saveThread({
       thread: {
         id: sessionId,
         resourceId: sessionId,
         title: "Sales chat",
         metadata: {},
+        createdAt: now,
+        updatedAt: now,
       },
     });
   } catch (err) {

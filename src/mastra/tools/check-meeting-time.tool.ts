@@ -2,6 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { env } from "@/config/env";
 import {
+  getSlotRejectionReason,
   isTimeSlotAvailable,
   proposeFreeSlotsForWeek,
 } from "@/services/google/calendar.service";
@@ -30,6 +31,7 @@ const inputSchema = z.object({
 
 const outputSchema = z.object({
   available: z.boolean(),
+  outsideBusinessHours: z.boolean().optional(),
   notConnected: z.boolean().optional(),
   alternativeSlots: z
     .array(
@@ -75,6 +77,42 @@ export const checkMeetingTimeTool = createTool({
   outputSchema,
   execute: async (inputData) => {
     try {
+      const start = new Date(inputData.startTime);
+      const end = new Date(inputData.endTime);
+      const rejection = getSlotRejectionReason(start, end);
+      const tz = await displayTimezone(inputData.sessionId);
+
+      if (rejection === "outside_hours") {
+        const alternatives = await proposeFreeSlotsForWeek({
+          salesRepId: env.DEFAULT_SALES_REP_ID,
+          weekOf: inputData.startTime,
+          count: 3,
+        });
+        return {
+          available: false,
+          outsideBusinessHours: true,
+          message:
+            "That time is outside sales team working hours (8 AM–6 PM " +
+            env.SALES_TIMEZONE +
+            "). Offer alternatives below.",
+          alternativeSlots: alternatives.map((s) => ({
+            start: s.start,
+            end: s.end,
+            humanReadable: formatSlot(s.start, tz),
+          })),
+        };
+      }
+
+      if (rejection === "weekend" || rejection === "past") {
+        return {
+          available: false,
+          message:
+            rejection === "weekend"
+              ? "That day is a weekend — ask for a weekday."
+              : "That time is in the past — ask for a future time.",
+        };
+      }
+
       const available = await isTimeSlotAvailable({
         salesRepId: env.DEFAULT_SALES_REP_ID,
         startTime: inputData.startTime,
@@ -84,7 +122,7 @@ export const checkMeetingTimeTool = createTool({
       if (available) {
         return {
           available: true,
-          message: "That time is available.",
+          message: "That time is available — call book-meeting now.",
         };
       }
 
@@ -94,14 +132,12 @@ export const checkMeetingTimeTool = createTool({
         count: 3,
       });
 
-      const tz = await displayTimezone(inputData.sessionId);
-
       return {
         available: false,
         message:
           alternatives.length > 0
-            ? "That time is already booked. Here are open slots the same week."
-            : "That time is not available and no alternate slots were found this week.",
+            ? "That time is already booked. Here are open slots the same week — ask customer to pick 1/2/3."
+            : "That time is busy and no alternate slots were found this week.",
         alternativeSlots: alternatives.map((s) => ({
           start: s.start,
           end: s.end,

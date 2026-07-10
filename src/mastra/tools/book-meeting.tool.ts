@@ -45,8 +45,8 @@ export const bookMeetingTool = createTool({
   id: "book-meeting",
   description:
     "Create a Google Calendar event with a Google Meet link and invite the customer. " +
-    "Call this only after the customer has chosen a slot from propose-meeting-slots " +
-    "and provided a valid email.",
+    "Call after check-meeting-time returns available=true, or when the customer picked " +
+    "slot 1/2/3 from propose-meeting-slots. Use ISO start/end from the check or slot list.",
   inputSchema,
   outputSchema,
   execute: async (inputData) => {

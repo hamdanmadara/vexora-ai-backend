@@ -62,13 +62,17 @@ export async function postChat(req: Request, res: Response): Promise<void> {
     send("status", { phase: "started" });
 
     let any = false;
-    for await (const chunk of streamChat({
+    for await (const event of streamChat({
       sessionId: body.sessionId,
       message: body.message,
       channel: body.channel,
     })) {
-      any = true;
-      send("delta", { content: chunk });
+      if (event.kind === "status") {
+        send("status", { phase: event.phase });
+      } else {
+        any = true;
+        send("delta", { content: event.content });
+      }
     }
     if (!any) {
       send("delta", {

@@ -43,7 +43,9 @@ export function normalizeAssistantText(text: string): string {
     );
   }
 
-  out = out.replace(/(https?:\/\/[^\s]+)([A-Za-z])/g, "$1 $2");
+  // NOTE: never re-touch URLs after restoring them — a greedy pattern like
+  // /(https?:\/\/\S+)([A-Za-z])/ backtracks INTO the URL and injects a space
+  // before its last letter (broke Google Meet links).
   out = out.replace(/(\d+)\s*-\s*(minute|min|hour|hr)/gi, "$1-$2");
 
   out = out.replace(
