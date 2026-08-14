@@ -66,6 +66,26 @@ const EnvSchema = z.object({
     emptyToUndefined,
     z.string().min(1).optional()
   ),
+
+  // Zendesk Messaging (Sunshine Conversations) — first non-web channel.
+  // Default base URL targets the standalone Sunshine Conversations API;
+  // confirm against your Zendesk Messaging integration's actual webhook
+  // payloads before going live — Zendesk-integrated accounts occasionally
+  // differ from the standalone API in host/field naming.
+  ZENDESK_API_BASE_URL: z.string().url().default("https://api.smooch.io/v2"),
+  ZENDESK_APP_ID: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  ZENDESK_API_KEY_ID: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional()
+  ),
+  ZENDESK_API_KEY_SECRET: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional()
+  ),
+  ZENDESK_WEBHOOK_SECRET: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional()
+  ),
 });
 
 function emptyToUndefined(v: unknown): unknown {
@@ -96,4 +116,9 @@ export const featureFlags = {
     !!env.SUPABASE_SERVICE_ROLE_KEY &&
     !!env.SUPABASE_DB_URL,
   googleReady: !!env.GOOGLE_CLIENT_ID && !!env.GOOGLE_CLIENT_SECRET,
+  zendeskReady:
+    !!env.ZENDESK_APP_ID &&
+    !!env.ZENDESK_API_KEY_ID &&
+    !!env.ZENDESK_API_KEY_SECRET &&
+    !!env.ZENDESK_WEBHOOK_SECRET,
 } as const;

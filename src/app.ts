@@ -31,7 +31,19 @@ export function createApp(): Express {
 
   app.use(cors(buildCorsOptions()));
 
-  app.use(express.json({ limit: "2mb" }));
+  // `verify` stashes the exact raw bytes on req.rawBody for every request —
+  // harmless for routes that don't read it, but required by the Zendesk
+  // webhook to verify its HMAC signature (which is computed over the raw
+  // body, not the re-serialized parsed object). See
+  // src/types/express.d.ts for the rawBody type augmentation.
+  app.use(
+    express.json({
+      limit: "2mb",
+      verify: (req, _res, buf) => {
+        (req as unknown as { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+      },
+    })
+  );
   app.use(express.urlencoded({ extended: true }));
   app.use(requestLogger);
 
