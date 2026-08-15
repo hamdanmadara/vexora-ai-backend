@@ -4,8 +4,19 @@ import { logger } from "@/utils/logger";
 import { runMigrations } from "@/db/migrate";
 import { closePool } from "@/db/pool";
 import { recoverPendingDocuments } from "@/services/document/document.service";
+import { registerAdapter } from "@/channels/channel-manager";
+import { zendeskAdapter } from "@/channels/adapters/zendesk/zendesk.adapter";
 
 async function bootstrap(): Promise<void> {
+  if (featureFlags.zendeskReady) {
+    registerAdapter(zendeskAdapter);
+    logger.info("Zendesk channel adapter registered");
+  } else {
+    logger.warn(
+      "Zendesk env not set — /api/channels/zendesk/webhook will respond 503. Set ZENDESK_* vars to enable it."
+    );
+  }
+
   if (featureFlags.supabaseReady) {
     try {
       await runMigrations();
