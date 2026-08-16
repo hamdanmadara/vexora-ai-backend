@@ -205,8 +205,50 @@ export function shouldKnowledgeOfferCall(
 }
 
 /** Customer explicitly wants to talk / schedule. */
-export const EXPLICIT_CALL_REQUEST_RE =
-  /\b(schedule|book( a)? (a )?call|set up a (quick )?call|arrange a call|speak (with|to)|talk to (someone|your team|sales)|want (a|to) (schedule|book)|need (a|to) (schedule|book)|let'?s (schedule|book)|can we (talk|chat|meet)|google meet|zoom call)\b/i;
+/**
+ * The customer explicitly asks to talk. Built by alternation rather than one
+ * long literal so the booking verbs and the things you can book stay easy to
+ * extend — the previous version only covered "book a CALL", so a customer
+ * saying "yes book the meeting" fell through to the knowledge agent and got a
+ * "our team will reach out" brush-off instead of being scheduled.
+ */
+export const EXPLICIT_CALL_REQUEST_RE = new RegExp(
+  [
+    "\\bschedule\\b",
+    // book / set up / arrange (a|the|another) (quick) call|meeting|demo|…
+    "\\b(?:book|schedule|arrange|set\\s?up|have)\\s+(?:an?|the|another)?\\s*(?:quick|short|brief|30[-\\s]?min(?:ute)?)?\\s*(?:call|meeting|demo|appointment|chat|session)\\b",
+    "\\bspeak\\s+(?:with|to)\\b",
+    "\\btalk\\s+to\\s+(?:someone|your team|sales)\\b",
+    "\\b(?:want|need|like)\\s+(?:a|to)\\s+(?:schedule|book|meet)\\b",
+    "\\blet'?s\\s+(?:schedule|book|meet|talk)\\b",
+    "\\bcan\\s+we\\s+(?:talk|chat|meet)\\b",
+    "\\bgoogle\\s+meet\\b",
+    "\\bzoom\\s+call\\b",
+  ].join("|"),
+  "i"
+);
+
+/** Opens with a yes — "yes", "sure,", "ok", "sounds good", … */
+const AFFIRMATIVE_OPENER_RE =
+  /^(?:yes|yeah|yep|yup|sure|ok|okay|sounds good|great|perfect|absolutely|definitely|please)\b/i;
+
+/**
+ * Words that mean the "yes" is about learning more, not about booking —
+ * "yes please show me pricing" must stay with the knowledge agent.
+ */
+const KNOWLEDGE_FOLLOWUP_RE =
+  /\b(pricing|price|cost|plans?|products?|features?|tell me more|more about|what (else|other))\b/i;
+
+/**
+ * True when the customer is accepting a call we just offered, in whatever
+ * words they used — a bare "yes" or "yes, book the meeting" alike. Only
+ * meaningful once an offer is on the table, which the caller checks.
+ */
+export function isMeetingAcceptance(message: string): boolean {
+  const trimmed = message.trim();
+  if (KNOWLEDGE_FOLLOWUP_RE.test(trimmed)) return false;
+  return AFFIRMATIVE_OPENER_RE.test(trimmed);
+}
 
 const STRONG_BUYING_RE =
   /\b(pricing|price|cost|enterprise|custom plan|contract|annual|volume|partnership|integration for our)\b/i;

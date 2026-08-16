@@ -4,6 +4,7 @@ import { extractTimezoneFromText } from "@/utils/timezone";
 import {
   CALL_DECLINE_RE,
   EXPLICIT_CALL_REQUEST_RE,
+  isMeetingAcceptance,
   type LeadMeta,
 } from "./lead-meta";
 
@@ -175,6 +176,18 @@ export function isSchedulingMessage(
     !EMAIL_IN_TEXT_RE.test(trimmed)
   ) {
     return false;
+  }
+
+  // Accepting an offer we just made outranks the knowledge check below:
+  // "yes please book it" would otherwise be swallowed by the pricing
+  // follow-up pattern ("yes please") and never reach the scheduler.
+  if (
+    (meta.meetingOffered ||
+      meta.pendingTopic === "meeting" ||
+      lead.status === "meeting_proposed") &&
+    isMeetingAcceptance(trimmed)
+  ) {
+    return true;
   }
 
   if (isKnowledgeIntentMessage(trimmed)) return false;
