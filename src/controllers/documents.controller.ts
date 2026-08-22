@@ -8,6 +8,7 @@ import {
 } from "@/services/document/document.service";
 import { BadRequestError } from "@/utils/errors";
 import { logger } from "@/utils/logger";
+import { authOf } from "@/middleware/require-auth";
 
 function serializeDocument(doc: Awaited<ReturnType<typeof getDocument>>) {
   return {
@@ -28,6 +29,7 @@ export async function uploadDocuments(
   req: Request,
   res: Response
 ): Promise<void> {
+  const { userId } = authOf(req);
   const files = (req.files as Express.Multer.File[] | undefined) ?? [];
   if (files.length === 0) {
     throw new BadRequestError("No files were uploaded. Use field name 'files'.");
@@ -39,6 +41,7 @@ export async function uploadDocuments(
         name: file.originalname,
         mimeType: file.mimetype,
         sizeBytes: file.size,
+        tenantId: userId,
       });
 
       // Kick off ingestion in the background. We don't await it so the
@@ -48,6 +51,7 @@ export async function uploadDocuments(
         buffer: file.buffer,
         filename: file.originalname,
         mimetype: file.mimetype,
+        tenantId: userId,
       }).catch((err) =>
         logger.error({ err, documentId: row.id }, "Background ingestion failed")
       );
@@ -60,10 +64,11 @@ export async function uploadDocuments(
 }
 
 export async function listAllDocuments(
-  _req: Request,
+  req: Request,
   res: Response
 ): Promise<void> {
-  const docs = await listDocuments();
+  const { userId } = authOf(req);
+  const docs = await listDocuments(userId);
   res.json({ documents: docs.map(serializeDocument) });
 }
 
@@ -71,9 +76,10 @@ export async function getOneDocument(
   req: Request<{ id: string }>,
   res: Response
 ): Promise<void> {
+  const { userId } = authOf(req);
   const id = String(req.params.id ?? "");
   if (!id) throw new BadRequestError("Missing document id");
-  const doc = await getDocument(id);
+  const doc = await getDocument(id, userId);
   res.json({ document: serializeDocument(doc) });
 }
 
@@ -81,8 +87,9 @@ export async function removeDocument(
   req: Request<{ id: string }>,
   res: Response
 ): Promise<void> {
+  const { userId } = authOf(req);
   const id = String(req.params.id ?? "");
   if (!id) throw new BadRequestError("Missing document id");
-  await deleteDocument(id);
+  await deleteDocument(id, userId);
   res.json({ ok: true });
 }

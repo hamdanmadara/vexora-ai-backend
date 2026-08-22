@@ -12,9 +12,15 @@ export type KnowledgeHit = {
 
 const MAX_PASSAGE_CHARS = 900;
 
-/** Vector search over uploaded company documents (shared by tool + chat prefetch). */
+/**
+ * Vector search over uploaded company documents (shared by tool + chat
+ * prefetch). tenantId is MANDATORY isolation: chunks are stored with the
+ * owner's tenant in metadata, and every query filters on it — without this,
+ * one workspace's bot would answer from another workspace's documents.
+ */
 export async function searchKnowledge(
   query: string,
+  tenantId: string,
   topK?: number
 ): Promise<KnowledgeHit[]> {
   try {
@@ -27,6 +33,7 @@ export async function searchKnowledge(
       indexName: env.KNOWLEDGE_INDEX_NAME,
       queryVector: embedding,
       topK: topK ?? env.RAG_TOP_K,
+      filter: { tenantId },
     });
 
     return hits.map((h) => {
