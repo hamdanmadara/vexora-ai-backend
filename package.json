@@ -19,10 +19,12 @@
     "@mastra/pg": "^1.11.0",
     "@mastra/rag": "^2.2.1",
     "ai": "^6.0.185",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "googleapis": "^144.0.0",
+    "jsonwebtoken": "^9.0.3",
     "mammoth": "^1.8.0",
     "multer": "^2.1.1",
     "openai": "^4.73.0",
@@ -34,8 +36,10 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^1.4.12",
     "@types/node": "^22.9.0",
     "@types/pdf-parse": "^1.1.4",

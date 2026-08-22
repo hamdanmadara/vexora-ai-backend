@@ -1,5 +1,4 @@
 import type { Request, Response } from "express";
-import { env } from "@/config/env";
 import {
   buildAuthUrl,
   handleOAuthCallback,
@@ -7,15 +6,36 @@ import {
 } from "@/services/google/oauth.service";
 import { getGoogleCredentials } from "@/services/google/credentials.service";
 import { BadRequestError } from "@/utils/errors";
+import { authOf } from "@/middleware/require-auth";
+import {
+  signOAuthState,
+  verifyOAuthState,
+} from "@/services/auth/token.service";
 
+/**
+ * GET /api/auth/google/connect  (authenticated)
+ *
+ * Returns the Google consent URL as JSON rather than redirecting: the
+ * browser navigation that follows can't carry a bearer token, so the
+ * frontend fetches this (authenticated), then navigates to `url`. The
+ * signed state binds the eventual callback to this user.
+ */
 export async function startGoogleAuth(
-  _req: Request,
+  req: Request,
   res: Response
 ): Promise<void> {
-  const url = buildAuthUrl(env.DEFAULT_SALES_REP_ID);
-  res.redirect(url);
+  const { userId } = authOf(req);
+  const url = buildAuthUrl(signOAuthState(userId));
+  res.json({ url });
 }
 
+/**
+ * GET /api/auth/google/callback  (public — Google's redirect)
+ *
+ * The state param is our HMAC-signed user binding; an invalid or expired
+ * state is rejected, so a forged callback can't attach a calendar to
+ * someone else's workspace.
+ */
 export async function googleAuthCallback(
   req: Request,
   res: Response
@@ -23,9 +43,10 @@ export async function googleAuthCallback(
   const code = typeof req.query.code === "string" ? req.query.code : "";
   const state = typeof req.query.state === "string" ? req.query.state : "";
   if (!code) throw new BadRequestError("Missing OAuth code");
+  if (!state) throw new BadRequestError("Missing OAuth state");
 
-  const salesRepId = state || env.DEFAULT_SALES_REP_ID;
-  const result = await handleOAuthCallback(code, salesRepId);
+  const userId = verifyOAuthState(state);
+  const result = await handleOAuthCallback(code, userId);
 
   const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Google connected</title>
@@ -45,14 +66,14 @@ export async function googleAuthCallback(
   res.send(html);
 }
 
+/** GET /api/auth/google/status  (authenticated) — this user's connection. */
 export async function googleStatus(
-  _req: Request,
+  req: Request,
   res: Response
 ): Promise<void> {
-  const connected = await isGoogleConnected(env.DEFAULT_SALES_REP_ID);
-  const creds = connected
-    ? await getGoogleCredentials(env.DEFAULT_SALES_REP_ID)
-    : null;
+  const { userId } = authOf(req);
+  const connected = await isGoogleConnected(userId);
+  const creds = connected ? await getGoogleCredentials(userId) : null;
   res.json({
     connected,
     email: creds?.google_email ?? null,

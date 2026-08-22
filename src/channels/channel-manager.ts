@@ -1,4 +1,5 @@
 import { generateChat } from "@/services/chat/chat.service";
+import { env } from "@/config/env";
 import { logger } from "@/utils/logger";
 import { buildSessionId } from "./session-key";
 import type {
@@ -56,9 +57,13 @@ export async function handleInbound(
     "Channel Manager: dispatching inbound message"
   );
 
+  // The env-configured Zendesk integration belongs to exactly one workspace
+  // (ZENDESK_TENANT_ID). Per-user channel connections replace this mapping
+  // in a later phase.
   const { reply } = await generateChat({
     sessionId: message.sessionId,
     message: message.text,
+    tenantId: env.ZENDESK_TENANT_ID ?? "default",
     channel: message.channel,
   });
 

@@ -36,11 +36,21 @@ export async function listDocuments(
   return rows;
 }
 
-export async function getDocument(id: string): Promise<DocumentRow> {
+/**
+ * Fetch one document. When tenantId is given, ownership is part of the
+ * lookup — another tenant's document 404s rather than 403s, so the API
+ * never confirms that a given id exists in someone else's workspace.
+ */
+export async function getDocument(
+  id: string,
+  tenantId?: string
+): Promise<DocumentRow> {
   const pool = getPool();
   const { rows } = await pool.query<DocumentRow>(
-    `select * from documents where id = $1`,
-    [id]
+    tenantId
+      ? `select * from documents where id = $1 and tenant_id = $2`
+      : `select * from documents where id = $1`,
+    tenantId ? [id, tenantId] : [id]
   );
   const doc = rows[0];
   if (!doc) throw new NotFoundError(`Document ${id} not found`);
@@ -113,8 +123,11 @@ export async function recoverPendingDocuments(): Promise<number> {
   return rowCount ?? 0;
 }
 
-export async function deleteDocument(id: string): Promise<void> {
-  const doc = await getDocument(id);
+export async function deleteDocument(
+  id: string,
+  tenantId?: string
+): Promise<void> {
+  const doc = await getDocument(id, tenantId);
   const pool = getPool();
   const store = getVectorStore();
 

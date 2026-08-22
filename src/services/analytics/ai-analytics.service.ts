@@ -8,7 +8,6 @@ import { logger } from "@/utils/logger";
 import { getAnalyticsOverview } from "./analytics.service";
 import { resolvePeriod, type PeriodRange } from "./period";
 
-const TENANT = "default";
 
 /**
  * Caps that keep one report's cost and latency bounded regardless of how
@@ -159,6 +158,7 @@ interface LoadedConversation {
 }
 
 async function loadConversations(
+  tenantId: string,
   range: PeriodRange
 ): Promise<LoadedConversation[]> {
   const pool = getPool();
@@ -174,7 +174,7 @@ async function loadConversations(
       where tenant_id = $1 and created_at >= $2 and created_at < $3
       order by created_at asc
       limit ${MAX_CONVERSATIONS}`,
-    [TENANT, range.start, range.end]
+    [tenantId, range.start, range.end]
   );
 
   if (leads.length === 0) return [];
@@ -359,7 +359,8 @@ function toRecord(row: ReportRow): AnalyticsReportRecord {
 }
 
 export async function getSavedReport(
-  period: string
+  period: string,
+  tenantId: string
 ): Promise<AnalyticsReportRecord | null> {
   const pool = getPool();
   const { rows } = await pool.query<ReportRow>(
@@ -367,35 +368,36 @@ export async function getSavedReport(
             conversation_count, message_count, error, generated_at
        from analytics_reports
       where tenant_id = $1 and period = $2`,
-    [TENANT, period]
+    [tenantId, period]
   );
   return rows[0] ? toRecord(rows[0]) : null;
 }
 
-export async function listSavedReportPeriods(): Promise<string[]> {
+export async function listSavedReportPeriods(tenantId: string): Promise<string[]> {
   const pool = getPool();
   const { rows } = await pool.query<{ period: string }>(
     `select period from analytics_reports
       where tenant_id = $1 and status = 'ready'
       order by period desc`,
-    [TENANT]
+    [tenantId]
   );
   return rows.map((r) => r.period);
 }
 
-async function markGenerating(period: string): Promise<void> {
+async function markGenerating(period: string, tenantId: string): Promise<void> {
   const pool = getPool();
   await pool.query(
     `insert into analytics_reports (tenant_id, period, status, generated_at)
           values ($1, $2, 'generating', now())
      on conflict (tenant_id, period) do update
         set status = 'generating', error = null, generated_at = now()`,
-    [TENANT, period]
+    [tenantId, period]
   );
 }
 
 async function saveReport(
   period: string,
+  tenantId: string,
   insights: AiReportInsights,
   metrics: unknown,
   conversationCount: number,
@@ -417,7 +419,7 @@ async function saveReport(
      returning period, status, model, insights, metrics_snapshot,
                conversation_count, message_count, error, generated_at`,
     [
-      TENANT,
+      tenantId,
       period,
       env.OPENAI_CHAT_MODEL,
       JSON.stringify(insights),
@@ -429,13 +431,17 @@ async function saveReport(
   return toRecord(rows[0]!);
 }
 
-async function markFailed(period: string, message: string): Promise<void> {
+async function markFailed(
+  period: string,
+  tenantId: string,
+  message: string
+): Promise<void> {
   const pool = getPool();
   await pool.query(
     `update analytics_reports
         set status = 'failed', error = $3
       where tenant_id = $1 and period = $2`,
-    [TENANT, period, message.slice(0, 500)]
+    [tenantId, period, message.slice(0, 500)]
   );
 }
 
@@ -445,13 +451,14 @@ async function markFailed(period: string, message: string): Promise<void> {
  * saved report stays self-consistent as new conversations arrive.
  */
 export async function generateAiReport(
-  period: string
+  period: string,
+  tenantId: string
 ): Promise<AnalyticsReportRecord> {
   if (!featureFlags.openaiReady) throw new FeatureDisabledError("OpenAI");
   if (!featureFlags.supabaseReady) throw new FeatureDisabledError("Supabase");
 
   const range = resolvePeriod(period);
-  const conversations = await loadConversations(range);
+  const conversations = await loadConversations(tenantId, range);
 
   if (conversations.length === 0) {
     throw new BadRequestError(
@@ -459,10 +466,10 @@ export async function generateAiReport(
     );
   }
 
-  await markGenerating(period);
+  await markGenerating(period, tenantId);
 
   try {
-    const metrics = await getAnalyticsOverview(period);
+    const metrics = await getAnalyticsOverview(period, tenantId);
     const batches = chunk(conversations, CONVERSATIONS_PER_BATCH);
 
     logger.info(
@@ -490,6 +497,7 @@ export async function generateAiReport(
 
     const saved = await saveReport(
       period,
+      tenantId,
       insights,
       metrics,
       conversations.length,
@@ -500,7 +508,7 @@ export async function generateAiReport(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error({ err, period }, "analytics: AI report generation failed");
-    await markFailed(period, message).catch(() => undefined);
+    await markFailed(period, tenantId, message).catch(() => undefined);
     throw err;
   }
 }

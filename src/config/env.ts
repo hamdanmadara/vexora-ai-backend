@@ -42,6 +42,17 @@ const EnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   SUPABASE_DB_URL: z.string().optional(),
 
+  // Auth — HMAC secret for access tokens and the Google OAuth state param.
+  // Must be long and random; rotating it signs everyone out.
+  JWT_SECRET: z.preprocess(
+    emptyToUndefined,
+    z.string().min(32, "JWT_SECRET must be at least 32 characters").optional()
+  ),
+  /** Access-token lifetime. Short: a stolen token ages out fast. */
+  JWT_ACCESS_TTL_MIN: z.coerce.number().int().positive().default(60),
+  /** Refresh-token lifetime in days (rotated on every use). */
+  JWT_REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(30),
+
   // Google
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
@@ -86,6 +97,16 @@ const EnvSchema = z.object({
     emptyToUndefined,
     z.string().min(1).optional()
   ),
+  /**
+   * Which user's workspace the (single, env-configured) Zendesk integration
+   * belongs to — conversations arriving on that webhook are stamped with
+   * this tenant. Falls back to the legacy 'default' tenant when unset.
+   * Per-user Zendesk connections replace this in a later phase.
+   */
+  ZENDESK_TENANT_ID: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional()
+  ),
 });
 
 function emptyToUndefined(v: unknown): unknown {
@@ -111,6 +132,7 @@ export const env: Env = parsed.data;
 
 export const featureFlags = {
   openaiReady: !!env.OPENAI_API_KEY,
+  authReady: !!env.JWT_SECRET,
   supabaseReady:
     !!env.SUPABASE_URL &&
     !!env.SUPABASE_SERVICE_ROLE_KEY &&

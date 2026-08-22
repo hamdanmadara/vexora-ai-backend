@@ -54,6 +54,15 @@ async function displayTimezone(sessionId?: string): Promise<string> {
   return env.SALES_TIMEZONE;
 }
 
+/** Whose calendar to check: the session's workspace owner. */
+async function resolveSalesRep(sessionId?: string): Promise<string> {
+  if (sessionId) {
+    const lead = await getLeadBySession(sessionId).catch(() => null);
+    if (lead) return lead.tenant_id;
+  }
+  return env.DEFAULT_SALES_REP_ID;
+}
+
 function formatSlot(iso: string, timeZone: string): string {
   const d = new Date(iso);
   return d.toLocaleString("en-US", {
@@ -81,10 +90,11 @@ export const checkMeetingTimeTool = createTool({
       const end = new Date(inputData.endTime);
       const rejection = getSlotRejectionReason(start, end);
       const tz = await displayTimezone(inputData.sessionId);
+      const salesRepId = await resolveSalesRep(inputData.sessionId);
 
       if (rejection === "outside_hours") {
         const alternatives = await proposeFreeSlotsForWeek({
-          salesRepId: env.DEFAULT_SALES_REP_ID,
+          salesRepId,
           weekOf: inputData.startTime,
           count: 3,
         });
@@ -114,7 +124,7 @@ export const checkMeetingTimeTool = createTool({
       }
 
       const available = await isTimeSlotAvailable({
-        salesRepId: env.DEFAULT_SALES_REP_ID,
+        salesRepId,
         startTime: inputData.startTime,
         endTime: inputData.endTime,
       });
@@ -127,7 +137,7 @@ export const checkMeetingTimeTool = createTool({
       }
 
       const alternatives = await proposeFreeSlotsForWeek({
-        salesRepId: env.DEFAULT_SALES_REP_ID,
+        salesRepId,
         weekOf: inputData.startTime,
         count: 3,
       });
