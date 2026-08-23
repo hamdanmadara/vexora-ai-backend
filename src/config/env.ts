@@ -26,6 +26,18 @@ const EnvSchema = z.object({
         .filter(Boolean)
     ),
 
+  /**
+   * Public base URL of THIS backend (no trailing slash) — used to build the
+   * per-user webhook URLs shown in the Integrations UI. Locally the default
+   * is fine; in production set it to the deployed origin, e.g.
+   * https://vexora-ai-backend.onrender.com
+   */
+  BACKEND_BASE_URL: z
+    .string()
+    .url()
+    .default("http://localhost:4000")
+    .transform((v) => v.replace(/\/+$/, "")),
+
   // OpenAI
   OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required").optional(),
   OPENAI_CHAT_MODEL: z.string().default("gpt-4o-mini"),

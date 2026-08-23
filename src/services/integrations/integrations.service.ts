@@ -48,10 +48,7 @@ export interface PublicIntegration {
 }
 
 function webhookUrlFor(provider: string, token: string): string {
-  // The public URL of THIS backend. GOOGLE_REDIRECT_URI already encodes it,
-  // so reuse its origin rather than introducing another env var.
-  const origin = new URL(env.GOOGLE_REDIRECT_URI).origin;
-  return `${origin}/api/channels/${provider}/webhook/${token}`;
+  return `${env.BACKEND_BASE_URL}/api/channels/${provider}/webhook/${token}`;
 }
 
 function resolve(row: IntegrationRow): ResolvedIntegration {
