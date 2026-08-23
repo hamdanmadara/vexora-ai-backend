@@ -25,7 +25,8 @@ function requireGoogleConfig(): {
   return {
     clientId: env.GOOGLE_CLIENT_ID!,
     clientSecret: env.GOOGLE_CLIENT_SECRET!,
-    redirectUri: env.GOOGLE_REDIRECT_URI,
+    // googleReady (checked above) guarantees all three are present.
+    redirectUri: env.GOOGLE_REDIRECT_URI!,
   };
 }
 

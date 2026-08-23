@@ -16,9 +16,12 @@ const EnvSchema = z.object({
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace"])
     .default("info"),
+  // No hardcoded URLs anywhere in code: every origin below is REQUIRED and
+  // comes from the environment. Boot fails with a named error when one is
+  // missing — better than silently defaulting to localhost in production.
   CORS_ORIGINS: z
-    .string()
-    .default("http://localhost:5173")
+    .string({ required_error: "CORS_ORIGINS is required (comma-separated frontend origins)" })
+    .min(1)
     .transform((v) =>
       v
         .split(",")
@@ -28,25 +31,20 @@ const EnvSchema = z.object({
 
   /**
    * Public base URL of THIS backend (no trailing slash) — used to build the
-   * per-user webhook URLs shown in the Integrations UI. Locally the default
-   * is fine; in production set it to the deployed origin, e.g.
-   * https://vexora-ai-backend.onrender.com
+   * per-user webhook URLs shown in the Integrations UI.
    */
   BACKEND_BASE_URL: z
-    .string()
+    .string({ required_error: "BACKEND_BASE_URL is required (this backend's public origin)" })
     .url()
-    .default("http://localhost:4000")
     .transform((v) => v.replace(/\/+$/, "")),
 
   /**
    * Public base URL of the FRONTEND app (no trailing slash) — where
    * browser flows that leave the app (Google OAuth callback) land back.
-   * Production: your Vercel origin.
    */
   FRONTEND_BASE_URL: z
-    .string()
+    .string({ required_error: "FRONTEND_BASE_URL is required (the frontend's public origin)" })
     .url()
-    .default("http://localhost:5173")
     .transform((v) => v.replace(/\/+$/, "")),
 
   // OpenAI
@@ -90,9 +88,12 @@ const EnvSchema = z.object({
   // Google
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
-  GOOGLE_REDIRECT_URI: z
-    .string()
-    .default("http://localhost:4000/api/auth/google/callback"),
+  // No localhost default — the Google feature simply reports "not ready"
+  // until this is set (checked in featureFlags.googleReady below).
+  GOOGLE_REDIRECT_URI: z.preprocess(
+    emptyToUndefined,
+    z.string().url().optional()
+  ),
   DEFAULT_SALES_REP_ID: z.string().default("default"),
   /** IANA timezone for the sales rep's calendar (working hours), not the customer's. */
   SALES_TIMEZONE: z.string().default("America/New_York"),
@@ -172,7 +173,10 @@ export const featureFlags = {
     !!env.SUPABASE_URL &&
     !!env.SUPABASE_SERVICE_ROLE_KEY &&
     !!env.SUPABASE_DB_URL,
-  googleReady: !!env.GOOGLE_CLIENT_ID && !!env.GOOGLE_CLIENT_SECRET,
+  googleReady:
+    !!env.GOOGLE_CLIENT_ID &&
+    !!env.GOOGLE_CLIENT_SECRET &&
+    !!env.GOOGLE_REDIRECT_URI,
   zendeskReady:
     !!env.ZENDESK_APP_ID &&
     !!env.ZENDESK_API_KEY_ID &&
