@@ -1,6 +1,7 @@
 import { logger, type Logger } from "@/utils/logger";
 import type {
   AIResponse,
+  ChannelContext,
   ChannelId,
   IChannelAdapter,
   InboundChannelMessage,
@@ -25,6 +26,7 @@ export abstract class BaseChannelAdapter implements IChannelAdapter {
   abstract normalizeInbound(raw: unknown): InboundChannelMessage;
   abstract sendReply(
     target: OutboundTarget,
-    response: AIResponse
+    response: AIResponse,
+    ctx: ChannelContext
   ): Promise<void>;
 }

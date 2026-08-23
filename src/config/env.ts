@@ -53,6 +53,17 @@ const EnvSchema = z.object({
   /** Refresh-token lifetime in days (rotated on every use). */
   JWT_REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(30),
 
+  /**
+   * AES-256 key (base64, 32 bytes) for integration credentials at rest.
+   * Deliberately separate from JWT_SECRET: rotating one must not break the
+   * other. Losing it makes stored integration keys unrecoverable — users
+   * would re-enter them.
+   */
+  CREDENTIALS_ENCRYPTION_KEY: z.preprocess(
+    emptyToUndefined,
+    z.string().min(32).optional()
+  ),
+
   // Google
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
@@ -133,6 +144,7 @@ export const env: Env = parsed.data;
 export const featureFlags = {
   openaiReady: !!env.OPENAI_API_KEY,
   authReady: !!env.JWT_SECRET,
+  integrationsReady: !!env.CREDENTIALS_ENCRYPTION_KEY,
   supabaseReady:
     !!env.SUPABASE_URL &&
     !!env.SUPABASE_SERVICE_ROLE_KEY &&

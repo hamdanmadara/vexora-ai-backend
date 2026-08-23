@@ -1,29 +1,28 @@
-import { env, featureFlags } from "@/config/env";
-import { FeatureDisabledError } from "@/utils/errors";
+import { env } from "@/config/env";
 import { logger } from "@/utils/logger";
+import type { ZendeskCredentials } from "@/services/integrations/providers";
 import type { SunshineSendMessagePayload } from "./zendesk.types";
 
 /** Max 3 attempts total, exponential backoff (1s, 2s) — Phase 2 design doc, retry flow. */
 const RETRY_DELAYS_MS = [1000, 2000];
 
-function authHeader(): string {
-  const token = Buffer.from(
-    `${env.ZENDESK_API_KEY_ID}:${env.ZENDESK_API_KEY_SECRET}`
-  ).toString("base64");
+/**
+ * Stateless Sunshine Conversations client: every call takes the workspace's
+ * own credentials (from its integrations row) — nothing global.
+ */
+function authHeader(creds: ZendeskCredentials): string {
+  const token = Buffer.from(`${creds.keyId}:${creds.keySecret}`).toString(
+    "base64"
+  );
   return `Basic ${token}`;
 }
 
-function ensureReady(): void {
-  if (!featureFlags.zendeskReady) {
-    throw new FeatureDisabledError("Zendesk");
-  }
-}
-
 async function postMessage(
+  creds: ZendeskCredentials,
   conversationId: string,
   payload: SunshineSendMessagePayload
 ): Promise<void> {
-  const url = `${env.ZENDESK_API_BASE_URL}/apps/${env.ZENDESK_APP_ID}/conversations/${conversationId}/messages`;
+  const url = `${env.ZENDESK_API_BASE_URL}/apps/${creds.appId}/conversations/${conversationId}/messages`;
 
   let lastErr: unknown;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
@@ -32,7 +31,7 @@ async function postMessage(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: authHeader(),
+          Authorization: authHeader(creds),
         },
         body: JSON.stringify(payload),
       });
@@ -62,11 +61,11 @@ async function postMessage(
 }
 
 export async function sendTextMessage(
+  creds: ZendeskCredentials,
   conversationId: string,
   text: string
 ): Promise<void> {
-  ensureReady();
-  await postMessage(conversationId, {
+  await postMessage(creds, conversationId, {
     author: { type: "business" },
     content: { type: "text", text },
   });

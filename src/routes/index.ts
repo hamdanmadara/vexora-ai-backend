@@ -5,6 +5,7 @@ import { chatRouter } from "./chat.routes";
 import { googleAuthRouter } from "./google-auth.routes";
 import { analyticsRouter } from "./analytics.routes";
 import { authRouter } from "./auth.routes";
+import { integrationsRouter } from "./integrations.routes";
 import { requireAuth } from "@/middleware/require-auth";
 import { zendeskRouter } from "@/channels/adapters/zendesk/zendesk.routes";
 
@@ -25,3 +26,4 @@ apiRouter.use("/auth/google", googleAuthRouter);
 apiRouter.use("/documents", requireAuth, documentsRouter);
 apiRouter.use("/chat", requireAuth, chatRouter);
 apiRouter.use("/analytics", requireAuth, analyticsRouter);
+apiRouter.use("/integrations", requireAuth, integrationsRouter);
