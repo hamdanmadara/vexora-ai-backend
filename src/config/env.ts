@@ -38,6 +38,17 @@ const EnvSchema = z.object({
     .default("http://localhost:4000")
     .transform((v) => v.replace(/\/+$/, "")),
 
+  /**
+   * Public base URL of the FRONTEND app (no trailing slash) — where
+   * browser flows that leave the app (Google OAuth callback) land back.
+   * Production: your Vercel origin.
+   */
+  FRONTEND_BASE_URL: z
+    .string()
+    .url()
+    .default("http://localhost:5173")
+    .transform((v) => v.replace(/\/+$/, "")),
+
   // OpenAI
   OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required").optional(),
   OPENAI_CHAT_MODEL: z.string().default("gpt-4o-mini"),

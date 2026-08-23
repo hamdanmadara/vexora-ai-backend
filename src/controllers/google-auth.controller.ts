@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { env } from "@/config/env";
 import {
   buildAuthUrl,
   handleOAuthCallback,
@@ -42,28 +43,25 @@ export async function googleAuthCallback(
 ): Promise<void> {
   const code = typeof req.query.code === "string" ? req.query.code : "";
   const state = typeof req.query.state === "string" ? req.query.state : "";
-  if (!code) throw new BadRequestError("Missing OAuth code");
-  if (!state) throw new BadRequestError("Missing OAuth state");
 
-  const userId = verifyOAuthState(state);
-  const result = await handleOAuthCallback(code, userId);
+  // This is a browser navigation from Google — land the user back in the
+  // app either way, with the outcome in the query string, instead of
+  // stranding them on a JSON error or a dead-end "close this tab" page.
+  const settingsUrl = `${env.FRONTEND_BASE_URL}/settings`;
 
-  const html = `<!doctype html>
-<html><head><meta charset="utf-8"><title>Google connected</title>
-<style>
-  body { font-family: -apple-system, system-ui, sans-serif; padding: 40px; max-width: 480px; margin: 40px auto; }
-  .ok { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 16px 20px; border-radius: 12px; }
-  code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
-</style></head><body>
-<div class="ok">
-  <h2 style="margin:0 0 8px">Google connected!</h2>
-  <p style="margin:0">Connected account: <code>${result.email ?? "(unknown)"}</code></p>
-  <p>Vexora can now book meetings on this calendar. You can close this tab.</p>
-</div>
-</body></html>`;
+  try {
+    if (!code) throw new BadRequestError("Missing OAuth code");
+    if (!state) throw new BadRequestError("Missing OAuth state");
 
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.send(html);
+    const userId = verifyOAuthState(state);
+    await handleOAuthCallback(code, userId);
+    res.redirect(`${settingsUrl}?google=connected`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Connection failed";
+    res.redirect(
+      `${settingsUrl}?google=error&message=${encodeURIComponent(message.slice(0, 200))}`
+    );
+  }
 }
 
 /** GET /api/auth/google/status  (authenticated) — this user's connection. */
