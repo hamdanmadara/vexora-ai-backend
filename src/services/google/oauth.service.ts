@@ -2,6 +2,7 @@ import { google } from "googleapis";
 import { env, featureFlags } from "@/config/env";
 import { FeatureDisabledError, UnauthorizedError } from "@/utils/errors";
 import {
+  deleteGoogleCredentials,
   getGoogleCredentials,
   saveGoogleCredentials,
   updateAccessToken,
@@ -120,6 +121,25 @@ export async function getAuthorizedClient(salesRepId: string) {
   });
 
   return client;
+}
+
+/**
+ * Disconnect: revoke the refresh token at Google (best-effort — the token
+ * may already be expired/revoked) and delete the stored row. Returns false
+ * when there was nothing to disconnect.
+ */
+export async function disconnectGoogle(salesRepId: string): Promise<boolean> {
+  const creds = await getGoogleCredentials(salesRepId);
+  if (!creds) return false;
+
+  try {
+    const client = createOAuthClient();
+    await client.revokeToken(creds.refresh_token);
+  } catch {
+    // Best-effort: an already-invalid token must not block the disconnect.
+  }
+
+  return deleteGoogleCredentials(salesRepId);
 }
 
 export async function isGoogleConnected(salesRepId: string): Promise<boolean> {

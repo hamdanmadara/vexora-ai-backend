@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { env } from "@/config/env";
 import {
   buildAuthUrl,
+  disconnectGoogle,
   handleOAuthCallback,
   isGoogleConnected,
 } from "@/services/google/oauth.service";
@@ -62,6 +63,19 @@ export async function googleAuthCallback(
       `${settingsUrl}?google=error&message=${encodeURIComponent(message.slice(0, 200))}`
     );
   }
+}
+
+/**
+ * DELETE /api/auth/google  (authenticated) — disconnect this user's
+ * calendar: revoke at Google (best-effort) + remove stored credentials.
+ */
+export async function googleDisconnect(
+  req: Request,
+  res: Response
+): Promise<void> {
+  const { userId } = authOf(req);
+  const removed = await disconnectGoogle(userId);
+  res.json({ ok: true, removed });
 }
 
 /** GET /api/auth/google/status  (authenticated) — this user's connection. */
