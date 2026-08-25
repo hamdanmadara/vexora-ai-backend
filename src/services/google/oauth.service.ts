@@ -65,6 +65,22 @@ export async function handleOAuthCallback(
     );
   }
 
+  // Google's consent screen shows the Calendar permission as an OPT-IN
+  // checkbox — a user can click Continue without ticking it, and Google
+  // happily issues a token with only email access. Saving that token would
+  // show "Connected" while every booking fails with Insufficient
+  // Permission, so reject it here with instructions instead.
+  if (!tokens.scope?.includes("https://www.googleapis.com/auth/calendar")) {
+    try {
+      await client.revokeToken(tokens.refresh_token);
+    } catch {
+      // Best-effort: the useless grant should not linger either way.
+    }
+    throw new UnauthorizedError(
+      "The Google Calendar permission was not granted. Please reconnect and TICK the calendar checkbox on the consent screen."
+    );
+  }
+
   client.setCredentials(tokens);
 
   let email: string | null = null;

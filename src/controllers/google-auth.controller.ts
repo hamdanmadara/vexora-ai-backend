@@ -4,6 +4,7 @@ import {
   buildAuthUrl,
   disconnectGoogle,
   handleOAuthCallback,
+  isCalendarApiReady,
   isGoogleConnected,
 } from "@/services/google/oauth.service";
 import { getGoogleCredentials } from "@/services/google/credentials.service";
@@ -78,7 +79,12 @@ export async function googleDisconnect(
   res.json({ ok: true, removed });
 }
 
-/** GET /api/auth/google/status  (authenticated) — this user's connection. */
+/**
+ * GET /api/auth/google/status  (authenticated) — this user's connection.
+ * `connected` means a credentials row exists; `calendarReady` is a LIVE
+ * Calendar API check, so a revoked token or a consent given without the
+ * calendar checkbox shows up as needsReconnect instead of a false green.
+ */
 export async function googleStatus(
   req: Request,
   res: Response
@@ -86,8 +92,11 @@ export async function googleStatus(
   const { userId } = authOf(req);
   const connected = await isGoogleConnected(userId);
   const creds = connected ? await getGoogleCredentials(userId) : null;
+  const calendarReady = connected ? await isCalendarApiReady(userId) : false;
   res.json({
     connected,
+    calendarReady,
+    needsReconnect: connected && !calendarReady,
     email: creds?.google_email ?? null,
   });
 }
