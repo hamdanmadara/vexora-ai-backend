@@ -4,7 +4,8 @@ import {
   type LeadRow,
 } from "@/services/lead/lead.service";
 import { env, featureFlags } from "@/config/env";
-import { FeatureDisabledError } from "@/utils/errors";
+import { FeatureDisabledError, NotFoundError } from "@/utils/errors";
+import { getCompanyProfile } from "@/services/auth/auth.service";
 import { logger } from "@/utils/logger";
 import { isCalendarApiReady } from "@/services/google/oauth.service";
 import { routeToAgent } from "./router";
@@ -64,6 +65,9 @@ async function buildSystemHint(
   routedId: string,
   mayOfferMeeting: boolean
 ): Promise<string> {
+  // Per-workspace persona: the signed-up user's company profile beats any
+  // env-level branding, so every tenant's bot introduces the right company.
+  const company = await getCompanyProfile(lead.tenant_id).catch(() => null);
   const now = new Date();
   const dateLabel = new Intl.DateTimeFormat("en-US", {
     timeZone: meta.customerTimezone ?? env.SALES_TIMEZONE,
@@ -89,6 +93,12 @@ async function buildSystemHint(
     `Pass sessionId to any tool that accepts it.`,
   ];
 
+  if (company?.name) {
+    lines.push(
+      `- companyIdentity: You represent "${company.name}"${company.description ? ` — ${company.description}` : ""}. This OVERRIDES any other company description in your instructions. Speak as a member of the ${company.name} team.`
+    );
+  }
+
   if (meta.callDeclined) {
     lines.push(
       `- customerDeclinedCall: true (they said no to a call earlier — do NOT suggest a call/demo/meeting again unless they bring it up)`
@@ -102,9 +112,9 @@ async function buildSystemHint(
   }
 
   if (routedId === "scheduler") {
+    // The lead's tenant IS the sales rep whose calendar gets booked.
     const connected =
-      featureFlags.googleReady &&
-      (await isCalendarApiReady(env.DEFAULT_SALES_REP_ID));
+      featureFlags.googleReady && (await isCalendarApiReady(lead.tenant_id));
     lines.push(`- googleCalendarConnected: ${connected}`);
     if (!connected) {
       lines.push(
@@ -228,13 +238,23 @@ function expectNameFor(
 async function prepareLeadForTurn(
   sessionId: string,
   message: string,
+  tenantId: string,
   channel?: string
 ): Promise<{
   lead: LeadRow;
   meta: ReturnType<typeof parseLeadMeta>;
   offerCall: boolean;
 }> {
-  let lead = await getOrCreateLead({ sessionId, channel });
+  let lead = await getOrCreateLead({ sessionId, tenantId, channel });
+
+  // Session hijack guard: getOrCreateLead upserts on session_id, so a caller
+  // presenting an id that already belongs to ANOTHER workspace gets back
+  // that workspace's lead. Refuse — same shape as an unknown session, so the
+  // response never confirms the id exists elsewhere.
+  if (lead.tenant_id !== tenantId) {
+    throw new NotFoundError("Session not found");
+  }
+
   await ensureSessionThread(sessionId);
   const meta = bumpUserTurn(lead);
 
@@ -297,6 +317,8 @@ async function prepareLeadForTurn(
 export async function* streamChat(args: {
   sessionId: string;
   message: string;
+  /** Workspace this conversation belongs to (user id, or legacy 'default'). */
+  tenantId: string;
   channel?: string;
 }): AsyncGenerator<StreamChatEvent, void, void> {
   ensureReady();
@@ -304,6 +326,7 @@ export async function* streamChat(args: {
   const { lead, meta, offerCall } = await prepareLeadForTurn(
     args.sessionId,
     args.message,
+    args.tenantId,
     args.channel
   );
 
@@ -326,7 +349,7 @@ export async function* streamChat(args: {
 
   if (routedId === "knowledge") {
     yield { kind: "status", phase: "searching" };
-    const hits = await searchKnowledge(args.message, 3);
+    const hits = await searchKnowledge(args.message, args.tenantId, 3);
     finalHint = `${finalHint}\n\n${formatKnowledgeContext(hits)}`;
   }
 
@@ -421,12 +444,15 @@ export async function* streamChat(args: {
 export async function generateChat(args: {
   sessionId: string;
   message: string;
+  /** Workspace this conversation belongs to (user id, or legacy 'default'). */
+  tenantId: string;
   channel?: string;
 }): Promise<{ reply: string }> {
   ensureReady();
   const { lead, meta, offerCall } = await prepareLeadForTurn(
     args.sessionId,
     args.message,
+    args.tenantId,
     args.channel
   );
 
@@ -447,7 +473,7 @@ export async function generateChat(args: {
     offerCall
   );
   if (routedId === "knowledge") {
-    const hits = await searchKnowledge(args.message, 3);
+    const hits = await searchKnowledge(args.message, args.tenantId, 3);
     systemHint = `${systemHint}\n\n${formatKnowledgeContext(hits)}`;
   }
 

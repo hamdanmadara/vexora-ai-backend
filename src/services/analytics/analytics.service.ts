@@ -8,7 +8,6 @@ import {
   type PeriodRange,
 } from "./period";
 
-const TENANT = "default";
 
 /**
  * `leads.notes` holds the LeadMeta JSON blob (userTurns, pricingAsked,
@@ -102,7 +101,9 @@ function delta(value: number, previous: number): number | null {
   return Math.round(((value - previous) / previous) * 1000) / 10;
 }
 
-async function loadFunnelRow(range: PeriodRange): Promise<FunnelRow> {
+async function loadFunnelRow(
+  tenantId: string,
+  range: PeriodRange): Promise<FunnelRow> {
   const pool = getPool();
   // Stages are nested deliberately: reaching a later stage implies every
   // earlier one ("reached this stage or beyond"). Without that, a lead who
@@ -144,7 +145,7 @@ async function loadFunnelRow(range: PeriodRange): Promise<FunnelRow> {
        count(*) filter (where not engaged)::int as bounced,
        coalesce(avg(turns), 0)::float as avg_turns
      from stages`,
-    [TENANT, range.start, range.end]
+    [tenantId, range.start, range.end]
   );
   return (
     rows[0] ?? {
@@ -161,13 +162,16 @@ async function loadFunnelRow(range: PeriodRange): Promise<FunnelRow> {
   );
 }
 
-async function countMeetings(range: PeriodRange): Promise<number> {
+async function countMeetings(
+  tenantId: string,
+  range: PeriodRange
+): Promise<number> {
   const pool = getPool();
   const { rows } = await pool.query<{ count: number }>(
     `select count(*)::int as count
        from meetings
-      where created_at >= $1 and created_at < $2`,
-    [range.start, range.end]
+      where sales_rep_id = $1 and created_at >= $2 and created_at < $3`,
+    [tenantId, range.start, range.end]
   );
   return rows[0]?.count ?? 0;
 }
@@ -178,7 +182,9 @@ async function countMeetings(range: PeriodRange): Promise<number> {
  * Missing table or an unexpected shape must degrade to zero, never break the
  * dashboard.
  */
-async function countMessages(range: PeriodRange): Promise<number> {
+async function countMessages(
+  tenantId: string,
+  range: PeriodRange): Promise<number> {
   const pool = getPool();
   try {
     const { rows } = await pool.query<{ count: number }>(
@@ -187,7 +193,7 @@ async function countMessages(range: PeriodRange): Promise<number> {
          from mastra_messages m
          join l on m.thread_id like l.session_id || '%'
         where m.role in ('user', 'assistant')`,
-      [TENANT, range.start, range.end]
+      [tenantId, range.start, range.end]
     );
     return rows[0]?.count ?? 0;
   } catch (err) {
@@ -197,6 +203,7 @@ async function countMessages(range: PeriodRange): Promise<number> {
 }
 
 async function loadDaily(
+  tenantId: string,
   range: PeriodRange
 ): Promise<Array<{ date: string; conversations: number; meetings: number }>> {
   const pool = getPool();
@@ -209,15 +216,15 @@ async function loadDaily(
          from leads
         where tenant_id = $1 and created_at >= $2 and created_at < $3
         group by 1`,
-      [TENANT, range.start, range.end, tz]
+      [tenantId, range.start, range.end, tz]
     ),
     pool.query<{ d: string; count: number }>(
-      `select to_char(created_at at time zone $3, 'YYYY-MM-DD') as d,
+      `select to_char(created_at at time zone $4, 'YYYY-MM-DD') as d,
               count(*)::int as count
          from meetings
-        where created_at >= $1 and created_at < $2
+        where sales_rep_id = $1 and created_at >= $2 and created_at < $3
         group by 1`,
-      [range.start, range.end, tz]
+      [tenantId, range.start, range.end, tz]
     ),
   ]);
 
@@ -240,6 +247,7 @@ async function loadDaily(
 }
 
 async function loadChannels(
+  tenantId: string,
   range: PeriodRange
 ): Promise<Array<{ channel: string; conversations: number; booked: number }>> {
   const pool = getPool();
@@ -255,12 +263,13 @@ async function loadChannels(
       where tenant_id = $1 and created_at >= $2 and created_at < $3
       group by channel
       order by conversations desc`,
-    [TENANT, range.start, range.end]
+    [tenantId, range.start, range.end]
   );
   return rows;
 }
 
 async function loadHourly(
+  tenantId: string,
   range: PeriodRange
 ): Promise<Array<{ hour: number; conversations: number }>> {
   const pool = getPool();
@@ -270,7 +279,7 @@ async function loadHourly(
        from leads
       where tenant_id = $1 and created_at >= $2 and created_at < $3
       group by 1`,
-    [TENANT, range.start, range.end, env.SALES_TIMEZONE]
+    [tenantId, range.start, range.end, env.SALES_TIMEZONE]
   );
   const byHour = new Map(rows.map((r) => [r.hour, r.count]));
   return Array.from({ length: 24 }, (_, hour) => ({
@@ -280,6 +289,7 @@ async function loadHourly(
 }
 
 async function loadTimezones(
+  tenantId: string,
   range: PeriodRange
 ): Promise<Array<{ timezone: string; conversations: number }>> {
   const pool = getPool();
@@ -295,12 +305,13 @@ async function loadTimezones(
       group by 1
       order by conversations desc
       limit 8`,
-    [TENANT, range.start, range.end]
+    [tenantId, range.start, range.end]
   );
   return rows;
 }
 
 async function loadKnowledgeBase(
+  tenantId: string,
   range: PeriodRange
 ): Promise<AnalyticsOverview["knowledgeBase"]> {
   const pool = getPool();
@@ -322,7 +333,7 @@ async function loadKnowledgeBase(
             )::int as uploaded_this_period
        from documents
       where tenant_id = $1`,
-    [TENANT, range.start, range.end]
+    [tenantId, range.start, range.end]
   );
   const r = rows[0];
   return {
@@ -335,9 +346,9 @@ async function loadKnowledgeBase(
   };
 }
 
-async function loadUpcomingMeetings(): Promise<
-  AnalyticsOverview["upcomingMeetings"]
-> {
+async function loadUpcomingMeetings(
+  tenantId: string
+): Promise<AnalyticsOverview["upcomingMeetings"]> {
   const pool = getPool();
   const { rows } = await pool.query<{
     id: string;
@@ -348,9 +359,10 @@ async function loadUpcomingMeetings(): Promise<
   }>(
     `select id, attendee_name, attendee_email, start_time, meet_link
        from meetings
-      where start_time >= now() and status = 'scheduled'
+      where sales_rep_id = $1 and start_time >= now() and status = 'scheduled'
       order by start_time asc
-      limit 5`
+      limit 5`,
+    [tenantId]
   );
   return rows.map((r) => ({
     id: r.id,
@@ -361,13 +373,13 @@ async function loadUpcomingMeetings(): Promise<
   }));
 }
 
-async function loadAllTimeTotals(): Promise<{
+async function loadAllTimeTotals(tenantId: string): Promise<{
   conversationsAllTime: number;
 }> {
   const pool = getPool();
   const { rows } = await pool.query<{ count: number }>(
     `select count(*)::int as count from leads where tenant_id = $1`,
-    [TENANT]
+    [tenantId]
   );
   return { conversationsAllTime: rows[0]?.count ?? 0 };
 }
@@ -396,7 +408,8 @@ function buildFunnel(row: FunnelRow): FunnelStage[] {
  * headline numbers.
  */
 export async function getAnalyticsOverview(
-  period: string
+  period: string,
+  tenantId: string
 ): Promise<AnalyticsOverview> {
   const range = resolvePeriod(period);
   const prev = previousPeriod(period);
@@ -416,19 +429,19 @@ export async function getAnalyticsOverview(
     upcomingMeetings,
     allTime,
   ] = await Promise.all([
-    loadFunnelRow(range),
-    loadFunnelRow(prev),
-    countMeetings(range),
-    countMeetings(prev),
-    countMessages(range),
-    countMessages(prev),
-    loadDaily(range),
-    loadChannels(range),
-    loadHourly(range),
-    loadTimezones(range),
-    loadKnowledgeBase(range),
-    loadUpcomingMeetings(),
-    loadAllTimeTotals(),
+    loadFunnelRow(tenantId, range),
+    loadFunnelRow(tenantId, prev),
+    countMeetings(tenantId, range),
+    countMeetings(tenantId, prev),
+    countMessages(tenantId, range),
+    countMessages(tenantId, prev),
+    loadDaily(tenantId, range),
+    loadChannels(tenantId, range),
+    loadHourly(tenantId, range),
+    loadTimezones(tenantId, range),
+    loadKnowledgeBase(tenantId, range),
+    loadUpcomingMeetings(tenantId),
+    loadAllTimeTotals(tenantId),
   ]);
 
   const conversionRate = pct(funnelRow.booked, funnelRow.conversations);
@@ -504,7 +517,7 @@ export async function getAnalyticsOverview(
  * picker only ever offers periods with something to show. The current month
  * is always included even when still empty.
  */
-export async function listAvailablePeriods(): Promise<string[]> {
+export async function listAvailablePeriods(tenantId: string): Promise<string[]> {
   const pool = getPool();
   const { rows } = await pool.query<{ period: string }>(
     `select distinct to_char(created_at at time zone $2, 'YYYY-MM') as period
@@ -512,7 +525,7 @@ export async function listAvailablePeriods(): Promise<string[]> {
       where tenant_id = $1
       order by period desc
       limit 36`,
-    [TENANT, env.SALES_TIMEZONE]
+    [tenantId, env.SALES_TIMEZONE]
   );
   return rows.map((r) => r.period);
 }

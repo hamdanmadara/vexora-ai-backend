@@ -51,7 +51,7 @@ async function bootstrap(): Promise<void> {
         env: env.NODE_ENV,
         features: featureFlags,
       },
-      `Vexora backend ready → http://localhost:${env.PORT}`
+      `Vexora backend ready → ${env.BACKEND_BASE_URL} (port ${env.PORT})`
     );
   });
 

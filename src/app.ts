@@ -28,6 +28,9 @@ export function createApp(): Express {
   const app = express();
 
   app.disable("x-powered-by");
+  // Behind Render's proxy: makes req.ip the real client address (login
+  // throttling keys on it) instead of the proxy's.
+  app.set("trust proxy", 1);
 
   app.use(cors(buildCorsOptions()));
 

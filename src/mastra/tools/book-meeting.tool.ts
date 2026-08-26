@@ -1,6 +1,5 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { env } from "@/config/env";
 import { bookMeeting } from "@/services/google/calendar.service";
 import {
   getOrCreateLead,
@@ -72,7 +71,8 @@ export const bookMeetingTool = createTool({
       });
 
       const result = await bookMeeting({
-        salesRepId: env.DEFAULT_SALES_REP_ID,
+        // The lead's tenant is the workspace owner whose calendar we book.
+        salesRepId: lead.tenant_id,
         attendeeEmail: normalizeEmail(inputData.attendeeEmail),
         attendeeName: inputData.attendeeName,
         startTime: inputData.startTime,

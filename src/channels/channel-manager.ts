@@ -1,8 +1,10 @@
 import { generateChat } from "@/services/chat/chat.service";
+import { touchLastEvent } from "@/services/integrations/integrations.service";
 import { logger } from "@/utils/logger";
 import { buildSessionId } from "./session-key";
 import type {
   AIResponse,
+  ChannelContext,
   ChannelMessage,
   IChannelAdapter,
   InboundChannelMessage,
@@ -38,27 +40,34 @@ export function getAdapter(channel: string): IChannelAdapter {
 }
 
 /**
- * Runs one full inbound turn: resolve the session, call the chat core, then
- * deliver the reply back through the adapter it arrived on.
+ * Runs one full inbound turn for a resolved integration: map the session
+ * (scoped by integration so workspaces never collide), call the chat core
+ * under that workspace's tenant, then deliver the reply back through the
+ * adapter with that workspace's credentials.
  */
 export async function handleInbound(
-  inbound: InboundChannelMessage
+  inbound: InboundChannelMessage,
+  ctx: ChannelContext
 ): Promise<AIResponse> {
   const adapter = getAdapter(inbound.channel);
   const sessionId = buildSessionId(
     inbound.channel,
+    ctx.integrationId,
     inbound.customer.externalId
   );
   const message: ChannelMessage = { ...inbound, sessionId };
 
+  touchLastEvent(ctx.integrationId);
+
   logger.debug(
-    { channel: message.channel, sessionId },
+    { channel: message.channel, sessionId, tenantId: ctx.tenantId },
     "Channel Manager: dispatching inbound message"
   );
 
   const { reply } = await generateChat({
     sessionId: message.sessionId,
     message: message.text,
+    tenantId: ctx.tenantId,
     channel: message.channel,
   });
 
@@ -73,7 +82,8 @@ export async function handleInbound(
       externalId: message.customer.externalId,
       metadata: message.metadata,
     },
-    response
+    response,
+    ctx
   );
 
   return response;

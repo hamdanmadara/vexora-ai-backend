@@ -67,6 +67,18 @@ export interface OutboundTarget {
 }
 
 /**
+ * Which workspace's integration a message belongs to, with that
+ * integration's decrypted credentials. Resolved by the webhook controller
+ * from the per-user webhook token and threaded through the whole turn, so
+ * adapters never read global config.
+ */
+export interface ChannelContext {
+  integrationId: string;
+  tenantId: string;
+  credentials: Record<string, string>;
+}
+
+/**
  * The contract every channel (Zendesk, WhatsApp, Messenger, ...) implements.
  * The Channel Manager and ChatService only ever talk to this interface —
  * neither knows or cares which platform is on the other side.
@@ -76,5 +88,9 @@ export interface IChannelAdapter {
   /** Translate a raw, platform-specific payload into the common shape. */
   normalizeInbound(raw: unknown): InboundChannelMessage;
   /** Translate an AIResponse into a platform-specific call and deliver it. */
-  sendReply(target: OutboundTarget, response: AIResponse): Promise<void>;
+  sendReply(
+    target: OutboundTarget,
+    response: AIResponse,
+    ctx: ChannelContext
+  ): Promise<void>;
 }

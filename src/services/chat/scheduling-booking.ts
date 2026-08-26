@@ -93,7 +93,7 @@ export async function tryAutoBookMeeting(args: {
   try {
     if (rejection === "outside_hours") {
       const alternatives = await proposeFreeSlotsForWeek({
-        salesRepId: env.DEFAULT_SALES_REP_ID,
+        salesRepId: lead.tenant_id,
         weekOf: slot.startTime,
         count: 3,
         durationMin,
@@ -115,7 +115,7 @@ export async function tryAutoBookMeeting(args: {
     if (rejection === "weekend") {
       const requested = formatInTimezone(slot.startTime, tz);
       const alternatives = await proposeFreeSlots({
-        salesRepId: env.DEFAULT_SALES_REP_ID,
+        salesRepId: lead.tenant_id,
         daysAhead: 10,
         count: 3,
         durationMin,
@@ -143,14 +143,14 @@ export async function tryAutoBookMeeting(args: {
     }
 
     const available = await isTimeSlotAvailable({
-      salesRepId: env.DEFAULT_SALES_REP_ID,
+      salesRepId: lead.tenant_id,
       startTime: slot.startTime,
       endTime: slot.endTime,
     });
 
     if (!available) {
       const alternatives = await proposeFreeSlotsForWeek({
-        salesRepId: env.DEFAULT_SALES_REP_ID,
+        salesRepId: lead.tenant_id,
         weekOf: slot.startTime,
         count: 3,
         durationMin,
@@ -175,7 +175,7 @@ export async function tryAutoBookMeeting(args: {
     }
 
     const booked = await bookMeeting({
-      salesRepId: env.DEFAULT_SALES_REP_ID,
+      salesRepId: lead.tenant_id,
       attendeeEmail: lead.email,
       attendeeName: lead.name,
       startTime: slot.startTime,

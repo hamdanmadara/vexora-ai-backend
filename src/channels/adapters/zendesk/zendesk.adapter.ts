@@ -2,10 +2,12 @@ import { BaseChannelAdapter } from "@/channels/base-channel-adapter";
 import { CHANNELS } from "@/channels/types";
 import type {
   AIResponse,
+  ChannelContext,
   InboundChannelMessage,
   OutboundTarget,
 } from "@/channels/types";
 import { BadRequestError } from "@/utils/errors";
+import type { ZendeskCredentials } from "@/services/integrations/providers";
 import { sendTextMessage } from "./zendesk-api.service";
 import type { SunshineWebhookEvent } from "./zendesk.types";
 
@@ -55,9 +57,14 @@ export class ZendeskAdapter extends BaseChannelAdapter {
 
   async sendReply(
     target: OutboundTarget,
-    response: AIResponse
+    response: AIResponse,
+    ctx: ChannelContext
   ): Promise<void> {
-    await sendTextMessage(target.externalId, response.text);
+    await sendTextMessage(
+      ctx.credentials as unknown as ZendeskCredentials,
+      target.externalId,
+      response.text
+    );
   }
 }
 

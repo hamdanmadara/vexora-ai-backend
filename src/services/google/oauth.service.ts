@@ -2,6 +2,7 @@ import { google } from "googleapis";
 import { env, featureFlags } from "@/config/env";
 import { FeatureDisabledError, UnauthorizedError } from "@/utils/errors";
 import {
+  deleteGoogleCredentials,
   getGoogleCredentials,
   saveGoogleCredentials,
   updateAccessToken,
@@ -25,7 +26,8 @@ function requireGoogleConfig(): {
   return {
     clientId: env.GOOGLE_CLIENT_ID!,
     clientSecret: env.GOOGLE_CLIENT_SECRET!,
-    redirectUri: env.GOOGLE_REDIRECT_URI,
+    // googleReady (checked above) guarantees all three are present.
+    redirectUri: env.GOOGLE_REDIRECT_URI!,
   };
 }
 
@@ -60,6 +62,22 @@ export async function handleOAuthCallback(
     // logging out — Google then refuses to issue a new refresh token.
     throw new UnauthorizedError(
       "Google did not return a refresh token. Please remove access at https://myaccount.google.com/permissions and try again."
+    );
+  }
+
+  // Google's consent screen shows the Calendar permission as an OPT-IN
+  // checkbox — a user can click Continue without ticking it, and Google
+  // happily issues a token with only email access. Saving that token would
+  // show "Connected" while every booking fails with Insufficient
+  // Permission, so reject it here with instructions instead.
+  if (!tokens.scope?.includes("https://www.googleapis.com/auth/calendar")) {
+    try {
+      await client.revokeToken(tokens.refresh_token);
+    } catch {
+      // Best-effort: the useless grant should not linger either way.
+    }
+    throw new UnauthorizedError(
+      "The Google Calendar permission was not granted. Please reconnect and TICK the calendar checkbox on the consent screen."
     );
   }
 
@@ -119,6 +137,25 @@ export async function getAuthorizedClient(salesRepId: string) {
   });
 
   return client;
+}
+
+/**
+ * Disconnect: revoke the refresh token at Google (best-effort — the token
+ * may already be expired/revoked) and delete the stored row. Returns false
+ * when there was nothing to disconnect.
+ */
+export async function disconnectGoogle(salesRepId: string): Promise<boolean> {
+  const creds = await getGoogleCredentials(salesRepId);
+  if (!creds) return false;
+
+  try {
+    const client = createOAuthClient();
+    await client.revokeToken(creds.refresh_token);
+  } catch {
+    // Best-effort: an already-invalid token must not block the disconnect.
+  }
+
+  return deleteGoogleCredentials(salesRepId);
 }
 
 export async function isGoogleConnected(salesRepId: string): Promise<boolean> {

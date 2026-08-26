@@ -11,6 +11,7 @@ import {
   listSavedReportPeriods,
 } from "@/services/analytics/ai-analytics.service";
 import { currentPeriod, isValidPeriod } from "@/services/analytics/period";
+import { authOf } from "@/middleware/require-auth";
 
 function requirePeriod(raw: unknown): string {
   const period = typeof raw === "string" && raw ? raw : currentPeriod();
@@ -29,8 +30,9 @@ function ensureDb(): void {
 /** GET /api/analytics/overview?month=YYYY-MM — deterministic metrics. */
 export async function getOverview(req: Request, res: Response): Promise<void> {
   ensureDb();
+  const { userId } = authOf(req);
   const period = requirePeriod(req.query.month);
-  const overview = await getAnalyticsOverview(period);
+  const overview = await getAnalyticsOverview(period, userId);
   res.json(overview);
 }
 
@@ -38,11 +40,12 @@ export async function getOverview(req: Request, res: Response): Promise<void> {
  * GET /api/analytics/periods — months the picker should offer, plus which of
  * them already have a saved AI report (so the UI can badge them).
  */
-export async function getPeriods(_req: Request, res: Response): Promise<void> {
+export async function getPeriods(req: Request, res: Response): Promise<void> {
   ensureDb();
+  const { userId } = authOf(req);
   const [available, withReports] = await Promise.all([
-    listAvailablePeriods(),
-    listSavedReportPeriods(),
+    listAvailablePeriods(userId),
+    listSavedReportPeriods(userId),
   ]);
 
   const current = currentPeriod();
@@ -56,8 +59,9 @@ export async function getPeriods(_req: Request, res: Response): Promise<void> {
 /** GET /api/analytics/ai?month=YYYY-MM — saved report, or null if never generated. */
 export async function getAiReport(req: Request, res: Response): Promise<void> {
   ensureDb();
+  const { userId } = authOf(req);
   const period = requirePeriod(req.query.month);
-  const report = await getSavedReport(period);
+  const report = await getSavedReport(period, userId);
   res.json({ period, report });
 }
 
@@ -68,8 +72,9 @@ export async function getAiReport(req: Request, res: Response): Promise<void> {
  */
 export async function postAiReport(req: Request, res: Response): Promise<void> {
   ensureDb();
+  const { userId } = authOf(req);
   const body = (req.body ?? {}) as { month?: string };
   const period = requirePeriod(body.month);
-  const report = await generateAiReport(period);
+  const report = await generateAiReport(period, userId);
   res.status(201).json({ period, report });
 }

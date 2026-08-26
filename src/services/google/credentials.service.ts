@@ -59,6 +59,17 @@ export async function getGoogleCredentials(
   return rows[0] ?? null;
 }
 
+export async function deleteGoogleCredentials(
+  salesRepId: string
+): Promise<boolean> {
+  const pool = getPool();
+  const { rowCount } = await pool.query(
+    `delete from google_credentials where sales_rep_id = $1`,
+    [salesRepId]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 export async function updateAccessToken(input: {
   salesRepId: string;
   accessToken: string;

@@ -16,15 +16,36 @@ const EnvSchema = z.object({
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace"])
     .default("info"),
+  // No hardcoded URLs anywhere in code: every origin below is REQUIRED and
+  // comes from the environment. Boot fails with a named error when one is
+  // missing — better than silently defaulting to localhost in production.
   CORS_ORIGINS: z
-    .string()
-    .default("http://localhost:5173")
+    .string({ required_error: "CORS_ORIGINS is required (comma-separated frontend origins)" })
+    .min(1)
     .transform((v) =>
       v
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean)
     ),
+
+  /**
+   * Public base URL of THIS backend (no trailing slash) — used to build the
+   * per-user webhook URLs shown in the Integrations UI.
+   */
+  BACKEND_BASE_URL: z
+    .string({ required_error: "BACKEND_BASE_URL is required (this backend's public origin)" })
+    .url()
+    .transform((v) => v.replace(/\/+$/, "")),
+
+  /**
+   * Public base URL of the FRONTEND app (no trailing slash) — where
+   * browser flows that leave the app (Google OAuth callback) land back.
+   */
+  FRONTEND_BASE_URL: z
+    .string({ required_error: "FRONTEND_BASE_URL is required (the frontend's public origin)" })
+    .url()
+    .transform((v) => v.replace(/\/+$/, "")),
 
   // OpenAI
   OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required").optional(),
@@ -42,12 +63,37 @@ const EnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   SUPABASE_DB_URL: z.string().optional(),
 
+  // Auth — HMAC secret for access tokens and the Google OAuth state param.
+  // Must be long and random; rotating it signs everyone out.
+  JWT_SECRET: z.preprocess(
+    emptyToUndefined,
+    z.string().min(32, "JWT_SECRET must be at least 32 characters").optional()
+  ),
+  /** Access-token lifetime. Short: a stolen token ages out fast. */
+  JWT_ACCESS_TTL_MIN: z.coerce.number().int().positive().default(60),
+  /** Refresh-token lifetime in days (rotated on every use). */
+  JWT_REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(30),
+
+  /**
+   * AES-256 key (base64, 32 bytes) for integration credentials at rest.
+   * Deliberately separate from JWT_SECRET: rotating one must not break the
+   * other. Losing it makes stored integration keys unrecoverable — users
+   * would re-enter them.
+   */
+  CREDENTIALS_ENCRYPTION_KEY: z.preprocess(
+    emptyToUndefined,
+    z.string().min(32).optional()
+  ),
+
   // Google
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
-  GOOGLE_REDIRECT_URI: z
-    .string()
-    .default("http://localhost:4000/api/auth/google/callback"),
+  // No localhost default — the Google feature simply reports "not ready"
+  // until this is set (checked in featureFlags.googleReady below).
+  GOOGLE_REDIRECT_URI: z.preprocess(
+    emptyToUndefined,
+    z.string().url().optional()
+  ),
   DEFAULT_SALES_REP_ID: z.string().default("default"),
   /** IANA timezone for the sales rep's calendar (working hours), not the customer's. */
   SALES_TIMEZONE: z.string().default("America/New_York"),
@@ -86,6 +132,16 @@ const EnvSchema = z.object({
     emptyToUndefined,
     z.string().min(1).optional()
   ),
+  /**
+   * Which user's workspace the (single, env-configured) Zendesk integration
+   * belongs to — conversations arriving on that webhook are stamped with
+   * this tenant. Falls back to the legacy 'default' tenant when unset.
+   * Per-user Zendesk connections replace this in a later phase.
+   */
+  ZENDESK_TENANT_ID: z.preprocess(
+    emptyToUndefined,
+    z.string().min(1).optional()
+  ),
 });
 
 function emptyToUndefined(v: unknown): unknown {
@@ -111,11 +167,16 @@ export const env: Env = parsed.data;
 
 export const featureFlags = {
   openaiReady: !!env.OPENAI_API_KEY,
+  authReady: !!env.JWT_SECRET,
+  integrationsReady: !!env.CREDENTIALS_ENCRYPTION_KEY,
   supabaseReady:
     !!env.SUPABASE_URL &&
     !!env.SUPABASE_SERVICE_ROLE_KEY &&
     !!env.SUPABASE_DB_URL,
-  googleReady: !!env.GOOGLE_CLIENT_ID && !!env.GOOGLE_CLIENT_SECRET,
+  googleReady:
+    !!env.GOOGLE_CLIENT_ID &&
+    !!env.GOOGLE_CLIENT_SECRET &&
+    !!env.GOOGLE_REDIRECT_URI,
   zendeskReady:
     !!env.ZENDESK_APP_ID &&
     !!env.ZENDESK_API_KEY_ID &&

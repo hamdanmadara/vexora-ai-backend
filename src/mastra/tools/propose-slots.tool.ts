@@ -68,6 +68,15 @@ async function displayTimezone(sessionId?: string): Promise<string> {
   return env.SALES_TIMEZONE;
 }
 
+/** Whose calendar to read: the session's workspace owner. */
+async function resolveSalesRep(sessionId?: string): Promise<string> {
+  if (sessionId) {
+    const lead = await getLeadBySession(sessionId).catch(() => null);
+    if (lead) return lead.tenant_id;
+  }
+  return env.DEFAULT_SALES_REP_ID;
+}
+
 function formatSlot(iso: string, timeZone: string): string {
   const d = new Date(iso);
   return d.toLocaleString("en-US", {
@@ -97,15 +106,16 @@ export const proposeSlotsTool = createTool({
         durationMin = meta.meetingDurationMin ?? 30;
       }
 
+      const salesRepId = await resolveSalesRep(inputData.sessionId);
       const raw = inputData.weekOf
         ? await proposeFreeSlotsForWeek({
-            salesRepId: env.DEFAULT_SALES_REP_ID,
+            salesRepId,
             weekOf: inputData.weekOf,
             count: inputData.count,
             durationMin,
           })
         : await proposeFreeSlots({
-            salesRepId: env.DEFAULT_SALES_REP_ID,
+            salesRepId,
             daysAhead: inputData.daysAhead,
             count: inputData.count,
             durationMin,
