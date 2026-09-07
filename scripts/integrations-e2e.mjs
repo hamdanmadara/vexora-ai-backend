@@ -55,7 +55,8 @@ const su = await api("POST", "/auth/signup", {
 });
 check("signup", su.status === 201, `got ${su.status}`);
 const TOK = su.json.tokens.accessToken;
-const USER_ID = su.json.user.id;
+// Integrations belong to the ORGANIZATION (the tenant), not the user.
+const ORG_ID = su.json.organization.id;
 
 // --- catalog + validation paths ---------------------------------------------
 console.log("\n-- integrations API --");
@@ -107,7 +108,7 @@ console.log("\n-- encryption at rest --");
   });
   const { rows } = await pool.query(
     `select credentials from integrations where tenant_id = $1`,
-    [USER_ID]
+    [ORG_ID]
   );
   const stored = rows[0]?.credentials ?? "";
   check("stored blob is v1.<iv>.<tag>.<ct>", /^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(stored));

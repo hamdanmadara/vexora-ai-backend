@@ -8,7 +8,7 @@ import {
 } from "@/services/document/document.service";
 import { BadRequestError } from "@/utils/errors";
 import { logger } from "@/utils/logger";
-import { authOf } from "@/middleware/require-auth";
+import { tenantOf } from "@/middleware/require-auth";
 
 function serializeDocument(doc: Awaited<ReturnType<typeof getDocument>>) {
   return {
@@ -29,7 +29,7 @@ export async function uploadDocuments(
   req: Request,
   res: Response
 ): Promise<void> {
-  const { userId } = authOf(req);
+  const tenantId = tenantOf(req);
   const files = (req.files as Express.Multer.File[] | undefined) ?? [];
   if (files.length === 0) {
     throw new BadRequestError("No files were uploaded. Use field name 'files'.");
@@ -41,7 +41,7 @@ export async function uploadDocuments(
         name: file.originalname,
         mimeType: file.mimetype,
         sizeBytes: file.size,
-        tenantId: userId,
+        tenantId: tenantId,
       });
 
       // Kick off ingestion in the background. We don't await it so the
@@ -51,7 +51,7 @@ export async function uploadDocuments(
         buffer: file.buffer,
         filename: file.originalname,
         mimetype: file.mimetype,
-        tenantId: userId,
+        tenantId: tenantId,
       }).catch((err) =>
         logger.error({ err, documentId: row.id }, "Background ingestion failed")
       );
@@ -67,8 +67,8 @@ export async function listAllDocuments(
   req: Request,
   res: Response
 ): Promise<void> {
-  const { userId } = authOf(req);
-  const docs = await listDocuments(userId);
+  const tenantId = tenantOf(req);
+  const docs = await listDocuments(tenantId);
   res.json({ documents: docs.map(serializeDocument) });
 }
 
@@ -76,10 +76,10 @@ export async function getOneDocument(
   req: Request<{ id: string }>,
   res: Response
 ): Promise<void> {
-  const { userId } = authOf(req);
+  const tenantId = tenantOf(req);
   const id = String(req.params.id ?? "");
   if (!id) throw new BadRequestError("Missing document id");
-  const doc = await getDocument(id, userId);
+  const doc = await getDocument(id, tenantId);
   res.json({ document: serializeDocument(doc) });
 }
 
@@ -87,9 +87,9 @@ export async function removeDocument(
   req: Request<{ id: string }>,
   res: Response
 ): Promise<void> {
-  const { userId } = authOf(req);
+  const tenantId = tenantOf(req);
   const id = String(req.params.id ?? "");
   if (!id) throw new BadRequestError("Missing document id");
-  await deleteDocument(id, userId);
+  await deleteDocument(id, tenantId);
   res.json({ ok: true });
 }

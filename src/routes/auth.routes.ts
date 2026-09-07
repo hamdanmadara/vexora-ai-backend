@@ -4,6 +4,7 @@ import { requireAuth } from "@/middleware/require-auth";
 import {
   getMe,
   patchMe,
+  postChangePassword,
   postLogin,
   postLogout,
   postRefresh,
@@ -18,3 +19,4 @@ authRouter.post("/refresh", asyncHandler(postRefresh));
 authRouter.post("/logout", asyncHandler(postLogout));
 authRouter.get("/me", requireAuth, asyncHandler(getMe));
 authRouter.patch("/me", requireAuth, asyncHandler(patchMe));
+authRouter.post("/password", requireAuth, asyncHandler(postChangePassword));

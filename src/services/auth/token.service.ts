@@ -12,14 +12,25 @@ import { FeatureDisabledError, UnauthorizedError } from "@/utils/errors";
  * replayed directly if it leaks.
  */
 
-export type UserRole = "user" | "admin";
+/** Platform-level role. Org-level role lives on organization_members. */
+export type UserRole = "user" | "platform_admin";
+
+/** Role INSIDE an organization. */
+export type OrgRole = "admin" | "member";
 
 export interface AccessTokenPayload {
-  /** User id — doubles as the tenant id everywhere. */
+  /** User id — identity only. The TENANT is `org`, not this. */
   sub: string;
   email: string;
   /** Role rides in the token; a promotion takes effect on next refresh. */
   role: UserRole;
+  /**
+   * The workspace this user acts in — the tenant id on every table.
+   * Null only for platform admins, who have no workspace of their own.
+   */
+  org: string | null;
+  /** Their role inside that organization; null when `org` is null. */
+  orgRole: OrgRole | null;
 }
 
 function secret(): string {
@@ -43,16 +54,35 @@ export function verifyAccessToken(token: string): AccessTokenPayload {
       algorithms: ["HS256"],
       issuer: "vexora",
     });
-    const obj = decoded as { sub?: unknown; email?: unknown; role?: unknown };
+    const obj = decoded as {
+      sub?: unknown;
+      email?: unknown;
+      role?: unknown;
+      org?: unknown;
+      orgRole?: unknown;
+    };
+    const orgOk = obj.org === null || typeof obj.org === "string";
+    const orgRoleOk =
+      obj.orgRole === null ||
+      obj.orgRole === "admin" ||
+      obj.orgRole === "member";
     if (
       typeof decoded !== "object" ||
       typeof obj.sub !== "string" ||
       typeof obj.email !== "string" ||
-      (obj.role !== "user" && obj.role !== "admin")
+      (obj.role !== "user" && obj.role !== "platform_admin") ||
+      !orgOk ||
+      !orgRoleOk
     ) {
       throw new UnauthorizedError("Invalid token");
     }
-    return { sub: obj.sub, email: obj.email, role: obj.role };
+    return {
+      sub: obj.sub,
+      email: obj.email,
+      role: obj.role,
+      org: (obj.org as string | null) ?? null,
+      orgRole: (obj.orgRole as OrgRole | null) ?? null,
+    };
   } catch (err) {
     if (err instanceof UnauthorizedError) throw err;
     throw new UnauthorizedError(
@@ -72,16 +102,17 @@ export function hashRefreshToken(token: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Google OAuth state: binds a /connect click to the signed-in user so the
-// callback (which arrives from Google with no Authorization header) can't be
-// forged to attach a calendar to someone else's account.
+// Google OAuth state: binds a /connect click to the signed-in user's
+// WORKSPACE, so the callback (which arrives from Google with no
+// Authorization header) can't be forged to attach a calendar to another
+// organization.
 // ---------------------------------------------------------------------------
 
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
-export function signOAuthState(userId: string): string {
+export function signOAuthState(organizationId: string): string {
   const exp = Date.now() + OAUTH_STATE_TTL_MS;
-  const body = `${userId}.${exp}`;
+  const body = `${organizationId}.${exp}`;
   const sig = crypto
     .createHmac("sha256", secret())
     .update(body)
@@ -98,11 +129,11 @@ export function verifyOAuthState(state: string): string {
   }
   const parts = decoded.split(".");
   if (parts.length !== 3) throw new UnauthorizedError("Invalid OAuth state");
-  const [userId, expStr, sig] = parts as [string, string, string];
+  const [organizationId, expStr, sig] = parts as [string, string, string];
 
   const expected = crypto
     .createHmac("sha256", secret())
-    .update(`${userId}.${expStr}`)
+    .update(`${organizationId}.${expStr}`)
     .digest("base64url");
   const sigBuf = Buffer.from(sig);
   const expBuf = Buffer.from(expected);
@@ -112,5 +143,5 @@ export function verifyOAuthState(state: string): string {
   if (Number(expStr) < Date.now()) {
     throw new UnauthorizedError("OAuth state expired — restart the connect flow");
   }
-  return userId;
+  return organizationId;
 }

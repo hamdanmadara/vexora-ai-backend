@@ -23,11 +23,7 @@ export interface DocumentRow {
   updated_at: string;
 }
 
-const DEFAULT_TENANT = "default";
-
-export async function listDocuments(
-  tenantId: string = DEFAULT_TENANT
-): Promise<DocumentRow[]> {
+export async function listDocuments(tenantId: string): Promise<DocumentRow[]> {
   const pool = getPool();
   const { rows } = await pool.query<DocumentRow>(
     `select * from documents where tenant_id = $1 order by uploaded_at desc`,
@@ -61,14 +57,14 @@ export async function createDocumentRow(input: {
   name: string;
   mimeType: string;
   sizeBytes: number;
-  tenantId?: string;
+  tenantId: string;
 }): Promise<DocumentRow> {
   const pool = getPool();
   const { rows } = await pool.query<DocumentRow>(
     `insert into documents (tenant_id, name, mime_type, size_bytes, status)
      values ($1, $2, $3, $4, 'queued') returning *`,
     [
-      input.tenantId ?? DEFAULT_TENANT,
+      input.tenantId,
       input.name,
       input.mimeType,
       input.sizeBytes,
@@ -163,10 +159,10 @@ export async function ingestDocument(args: {
   buffer: Buffer;
   filename: string;
   mimetype: string;
-  tenantId?: string;
+  tenantId: string;
 }): Promise<void> {
   const { documentId, buffer, filename, mimetype } = args;
-  const tenantId = args.tenantId ?? DEFAULT_TENANT;
+  const tenantId = args.tenantId;
 
   try {
     await updateDocumentStatus(documentId, "processing");

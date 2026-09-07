@@ -14,7 +14,7 @@ import {
 } from "@/services/chat/chat-history.service";
 import { BadRequestError, NotFoundError } from "@/utils/errors";
 import { logger } from "@/utils/logger";
-import { authOf } from "@/middleware/require-auth";
+import { tenantOf } from "@/middleware/require-auth";
 
 const ChatBodySchema = z.object({
   sessionId: z.string().min(1, "sessionId is required"),
@@ -24,14 +24,14 @@ const ChatBodySchema = z.object({
 });
 
 export async function postChat(req: Request, res: Response): Promise<void> {
-  const { userId } = authOf(req);
+  const tenantId = tenantOf(req);
   const body = ChatBodySchema.parse(req.body);
 
   if (body.stream === false) {
     const result = await generateChat({
       sessionId: body.sessionId,
       message: body.message,
-      tenantId: userId,
+      tenantId,
       channel: body.channel,
     });
     res.json(result);
@@ -68,7 +68,7 @@ export async function postChat(req: Request, res: Response): Promise<void> {
     for await (const event of streamChat({
       sessionId: body.sessionId,
       message: body.message,
-      tenantId: userId,
+      tenantId,
       channel: body.channel,
     })) {
       if (event.kind === "status") {
@@ -100,14 +100,14 @@ export async function getChatHistory(
   req: Request<{ sessionId: string }>,
   res: Response
 ): Promise<void> {
-  const { userId } = authOf(req);
+  const tenantId = tenantOf(req);
   const sessionId = String(req.params.sessionId ?? "");
   if (!sessionId) throw new BadRequestError("Missing sessionId");
 
   const lead = await getLeadBySession(sessionId);
   // A brand-new session (no lead yet) is fine — empty history. A session
   // owned by ANOTHER workspace is indistinguishable from "not found".
-  if (lead && lead.tenant_id !== userId) {
+  if (lead && lead.tenant_id !== tenantId) {
     throw new NotFoundError("Session not found");
   }
 
@@ -119,12 +119,12 @@ export async function deleteChatHistory(
   req: Request<{ sessionId: string }>,
   res: Response
 ): Promise<void> {
-  const { userId } = authOf(req);
+  const tenantId = tenantOf(req);
   const sessionId = String(req.params.sessionId ?? "");
   if (!sessionId) throw new BadRequestError("Missing sessionId");
 
   const lead = await getLeadBySession(sessionId);
-  if (lead && lead.tenant_id !== userId) {
+  if (lead && lead.tenant_id !== tenantId) {
     throw new NotFoundError("Session not found");
   }
 

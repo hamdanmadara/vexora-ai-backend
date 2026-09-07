@@ -1,7 +1,6 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import {
-  getOrCreateLead,
   getLeadBySession,
   updateLead,
   type LeadStatus,
@@ -64,9 +63,6 @@ export const updateLeadTool = createTool({
   outputSchema,
   execute: async (inputData) => {
     try {
-      // Ensure the lead exists.
-      await getOrCreateLead({ sessionId: inputData.sessionId });
-
       if (inputData.email && !isEmail(inputData.email)) {
         return {
           ok: false,
@@ -74,8 +70,13 @@ export const updateLeadTool = createTool({
         };
       }
 
+      // Fail closed: the chat turn owns lead creation, so a missing lead
+      // means an unknown session rather than a first message.
       const existing = await getLeadBySession(inputData.sessionId);
-      const meta = parseLeadMeta(existing?.notes ?? null);
+      if (!existing) {
+        return { ok: false, lead: { name: null, email: null, status: "new" } };
+      }
+      const meta = parseLeadMeta(existing.notes);
 
       if (inputData.customerTimezone) {
         meta.customerTimezone = inputData.customerTimezone;

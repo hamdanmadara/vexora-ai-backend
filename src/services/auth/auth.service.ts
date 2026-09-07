@@ -1,21 +1,30 @@
-import bcrypt from "bcryptjs";
 import { getPool } from "@/db/pool";
 import { env } from "@/config/env";
-import {
-  BadRequestError,
-  ConflictError,
-  UnauthorizedError,
-} from "@/utils/errors";
+import { BadRequestError, UnauthorizedError } from "@/utils/errors";
 import { logger } from "@/utils/logger";
+import {
+  createOrganizationWithAdmin,
+  getMembershipForUser,
+  getOrganization,
+  normalizeEmail,
+  type OrgType,
+  type PublicOrganization,
+} from "@/services/organization/organization.service";
+import {
+  assertValidPassword,
+  comparePassword,
+  DUMMY_HASH,
+  hashPassword,
+} from "./password";
 import {
   generateRefreshToken,
   hashRefreshToken,
   signAccessToken,
+  type OrgRole,
+  type UserRole,
 } from "./token.service";
 
-const BCRYPT_ROUNDS = 12;
-
-export type UserRole = "user" | "admin";
+export type { UserRole };
 
 export interface UserRow {
   id: string;
@@ -23,20 +32,25 @@ export interface UserRow {
   password_hash: string;
   name: string;
   role: UserRole;
-  company_name: string | null;
-  company_description: string | null;
   created_at: string;
   updated_at: string;
 }
 
-/** The shape that ever leaves the API — password hash stripped. */
+/**
+ * The shape that ever leaves the API — password hash stripped.
+ *
+ * The company profile is NOT here: it belongs to the organization (the
+ * chatbot represents a company, not a person), so clients read it from
+ * `organization`.
+ */
 export interface PublicUser {
   id: string;
   email: string;
   name: string;
+  /** Platform-level role. */
   role: UserRole;
-  companyName: string | null;
-  companyDescription: string | null;
+  /** Role inside their organization; null for platform admins. */
+  orgRole: OrgRole | null;
   createdAt: string;
 }
 
@@ -47,14 +61,20 @@ export interface AuthTokens {
   expiresIn: number;
 }
 
-function toPublic(row: UserRow): PublicUser {
+export interface AuthResult {
+  user: PublicUser;
+  /** The workspace they act in. Null for platform admins (they have none). */
+  organization: PublicOrganization | null;
+  tokens: AuthTokens;
+}
+
+function toPublic(row: UserRow, orgRole: OrgRole | null): PublicUser {
   return {
     id: row.id,
     email: row.email,
     name: row.name,
     role: row.role,
-    companyName: row.company_name,
-    companyDescription: row.company_description,
+    orgRole,
     createdAt: new Date(row.created_at).toISOString(),
   };
 }
@@ -100,106 +120,122 @@ function clearFailures(email: string, ip: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Validation
+// Session assembly
 // ---------------------------------------------------------------------------
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+/**
+ * Build the full session for a user: their membership decides the tenant
+ * baked into the access token, so every later request carries its workspace.
+ */
+async function buildSession(user: UserRow): Promise<AuthResult> {
+  const membership = await getMembershipForUser(user.id);
+  const organization = membership
+    ? await getOrganization(membership.organizationId)
+    : null;
 
-function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
+  if (organization?.status === "suspended") {
+    throw new UnauthorizedError(
+      "This workspace is suspended. Please contact support."
+    );
+  }
 
-function assertValidSignup(email: string, password: string, name: string): void {
-  if (!EMAIL_RE.test(email)) {
-    throw new BadRequestError("Please enter a valid email address.");
-  }
-  if (password.length < 8) {
-    throw new BadRequestError("Password must be at least 8 characters.");
-  }
-  if (password.length > 128) {
-    throw new BadRequestError("Password must be at most 128 characters.");
-  }
-  if (name.trim().length < 2) {
-    throw new BadRequestError("Please enter your name.");
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Refresh-token persistence
-// ---------------------------------------------------------------------------
-
-async function issueTokens(user: UserRow): Promise<AuthTokens> {
   const pool = getPool();
   const refreshToken = generateRefreshToken();
-  const expiresAt = new Date(
-    Date.now() + env.JWT_REFRESH_TTL_DAYS * 86_400_000
-  );
+  const expiresAt = new Date(Date.now() + env.JWT_REFRESH_TTL_DAYS * 86_400_000);
 
   await pool.query(
-    `insert into refresh_tokens (user_id, token_hash, expires_at)
-     values ($1, $2, $3)`,
+    `insert into refresh_tokens (user_id, token_hash, expires_at) values ($1, $2, $3)`,
     [user.id, hashRefreshToken(refreshToken), expiresAt]
   );
 
   return {
-    accessToken: signAccessToken({
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-    }),
-    refreshToken,
-    expiresIn: env.JWT_ACCESS_TTL_MIN * 60,
+    user: toPublic(user, membership?.orgRole ?? null),
+    organization,
+    tokens: {
+      accessToken: signAccessToken({
+        sub: user.id,
+        email: user.email,
+        role: user.role,
+        org: membership?.organizationId ?? null,
+        orgRole: membership?.orgRole ?? null,
+      }),
+      refreshToken,
+      expiresIn: env.JWT_ACCESS_TTL_MIN * 60,
+    },
   };
+}
+
+async function getUserRow(userId: string): Promise<UserRow | null> {
+  const pool = getPool();
+  const { rows } = await pool.query<UserRow>(
+    `select * from users where id = $1`,
+    [userId]
+  );
+  return rows[0] ?? null;
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-export async function signup(input: {
+export interface SignupInput {
+  /** 'organization' = a company with seats; 'personal' = a solo workspace. */
+  accountType: OrgType;
   email: string;
   password: string;
   name: string;
+  /** Required for accountType='business'; defaults to the person's name otherwise. */
+  organizationName?: string;
   companyName?: string;
   companyDescription?: string;
-}): Promise<{ user: PublicUser; tokens: AuthTokens }> {
-  const email = normalizeEmail(input.email);
-  assertValidSignup(email, input.password, input.name);
+}
 
-  const pool = getPool();
-  const passwordHash = await bcrypt.hash(input.password, BCRYPT_ROUNDS);
+/**
+ * Signup always creates an ORGANIZATION plus its first admin. A personal
+ * account is simply a `personal` org with one seat, which keeps a single
+ * code path for B2B and B2C everywhere downstream.
+ *
+ * Signup can never create a platform admin — the column defaults to 'user'
+ * and no input maps to it. Staff are promoted manually in SQL.
+ */
+export async function signup(input: SignupInput): Promise<AuthResult> {
+  const type: OrgType =
+    input.accountType === "business" ? "business" : "personal";
 
-  let row: UserRow;
-  try {
-    const { rows } = await pool.query<UserRow>(
-      `insert into users (email, password_hash, name, company_name, company_description)
-       values ($1, $2, $3, $4, $5)
-       returning *`,
-      [
-        email,
-        passwordHash,
-        input.name.trim(),
-        input.companyName?.trim() || null,
-        input.companyDescription?.trim() || null,
-      ]
-    );
-    row = rows[0]!;
-  } catch (err) {
-    if ((err as { code?: string }).code === "23505") {
-      throw new ConflictError("An account with this email already exists.");
-    }
-    throw err;
+  if (type === "business" && !input.organizationName?.trim()) {
+    throw new BadRequestError("Please enter your organization name.");
   }
 
-  logger.info({ userId: row.id }, "auth: user signed up");
-  return { user: toPublic(row), tokens: await issueTokens(row) };
+  const organizationName =
+    type === "business"
+      ? input.organizationName!.trim()
+      : input.companyName?.trim() || `${input.name.trim()}'s workspace`;
+
+  const { userId } = await createOrganizationWithAdmin({
+    organizationName,
+    type,
+    name: input.name,
+    email: input.email,
+    password: input.password,
+    // For a business the org name doubles as the company the bot represents,
+    // unless a distinct one was supplied.
+    companyName:
+      input.companyName?.trim() || (type === "business" ? organizationName : null),
+    companyDescription: input.companyDescription ?? null,
+  });
+
+  const user = await getUserRow(userId);
+  if (!user) throw new UnauthorizedError("Account creation failed.");
+
+  logger.info({ userId, type }, "auth: user signed up");
+  return buildSession(user);
 }
 
 export async function login(input: {
   email: string;
   password: string;
   ip: string;
-}): Promise<{ user: PublicUser; tokens: AuthTokens }> {
+}): Promise<AuthResult> {
   const email = normalizeEmail(input.email);
   assertNotLocked(email, input.ip);
 
@@ -212,10 +248,7 @@ export async function login(input: {
 
   // Same hashing cost and same error whether the account exists or not, so
   // responses don't reveal which emails are registered.
-  const hash =
-    row?.password_hash ??
-    "$2a$12$XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
-  const ok = await bcrypt.compare(input.password, hash).catch(() => false);
+  const ok = await comparePassword(input.password, row?.password_hash ?? DUMMY_HASH);
 
   if (!row || !ok) {
     recordFailure(email, input.ip);
@@ -223,18 +256,17 @@ export async function login(input: {
   }
 
   clearFailures(email, input.ip);
-  return { user: toPublic(row), tokens: await issueTokens(row) };
+  return buildSession(row);
 }
 
 /**
  * Rotate: the presented token is revoked and a fresh pair is issued. A
  * revoked-token replay means the token leaked (or a race) — revoke the whole
  * family for that user as a precaution.
+ *
+ * Refresh is also where role, seat and suspension changes take effect.
  */
-export async function refresh(token: string): Promise<{
-  user: PublicUser;
-  tokens: AuthTokens;
-}> {
+export async function refresh(token: string): Promise<AuthResult> {
   const pool = getPool();
   const tokenHash = hashRefreshToken(token);
 
@@ -243,9 +275,10 @@ export async function refresh(token: string): Promise<{
     user_id: string;
     expires_at: string;
     revoked_at: string | null;
-  }>(`select id, user_id, expires_at, revoked_at from refresh_tokens where token_hash = $1`, [
-    tokenHash,
-  ]);
+  }>(
+    `select id, user_id, expires_at, revoked_at from refresh_tokens where token_hash = $1`,
+    [tokenHash]
+  );
   const stored = rows[0];
 
   if (!stored) throw new UnauthorizedError("Invalid session. Please log in again.");
@@ -256,7 +289,10 @@ export async function refresh(token: string): Promise<{
         where user_id = $1 and revoked_at is null`,
       [stored.user_id]
     );
-    logger.warn({ userId: stored.user_id }, "auth: revoked refresh token replayed — revoking all sessions");
+    logger.warn(
+      { userId: stored.user_id },
+      "auth: revoked refresh token replayed — revoking all sessions"
+    );
     throw new UnauthorizedError("Session invalidated. Please log in again.");
   }
 
@@ -264,11 +300,7 @@ export async function refresh(token: string): Promise<{
     throw new UnauthorizedError("Session expired. Please log in again.");
   }
 
-  const { rows: userRows } = await pool.query<UserRow>(
-    `select * from users where id = $1`,
-    [stored.user_id]
-  );
-  const user = userRows[0];
+  const user = await getUserRow(stored.user_id);
   if (!user) throw new UnauthorizedError("Account no longer exists.");
 
   await pool.query(`update refresh_tokens set revoked_at = now() where id = $1`, [
@@ -279,7 +311,7 @@ export async function refresh(token: string): Promise<{
     .query(`delete from refresh_tokens where expires_at < now() - interval '7 days'`)
     .catch(() => undefined);
 
-  return { user: toPublic(user), tokens: await issueTokens(user) };
+  return buildSession(user);
 }
 
 export async function logout(token: string): Promise<void> {
@@ -290,53 +322,78 @@ export async function logout(token: string): Promise<void> {
   );
 }
 
-export async function getUserById(id: string): Promise<PublicUser | null> {
-  const pool = getPool();
-  const { rows } = await pool.query<UserRow>(`select * from users where id = $1`, [
-    id,
-  ]);
-  return rows[0] ? toPublic(rows[0]) : null;
+/** Current user plus their workspace — what /api/auth/me returns. */
+export async function getSessionUser(
+  userId: string
+): Promise<{ user: PublicUser; organization: PublicOrganization | null } | null> {
+  const user = await getUserRow(userId);
+  if (!user) return null;
+  const membership = await getMembershipForUser(userId);
+  return {
+    user: toPublic(user, membership?.orgRole ?? null),
+    organization: membership
+      ? await getOrganization(membership.organizationId)
+      : null,
+  };
 }
 
-/** Company profile for the chatbot persona — null when the tenant has no user row (e.g. legacy 'default'). */
-export async function getCompanyProfile(
-  tenantId: string
-): Promise<{ name: string | null; description: string | null } | null> {
+/**
+ * Self-service password change — available to every account, whatever its
+ * role: members, organization admins and platform admins alike.
+ *
+ * The current password is required so an unattended, already-signed-in
+ * browser cannot be used to take the account over. Every existing session is
+ * then revoked and a fresh pair handed back to the caller, so changing a
+ * password really does sign out every other device.
+ */
+export async function changePassword(
+  userId: string,
+  input: { currentPassword: string; newPassword: string }
+): Promise<AuthResult> {
+  const user = await getUserRow(userId);
+  if (!user) throw new UnauthorizedError("Account no longer exists.");
+
+  if (!(await comparePassword(input.currentPassword, user.password_hash))) {
+    throw new BadRequestError("Your current password is incorrect.");
+  }
+
+  assertValidPassword(input.newPassword);
+  if (await comparePassword(input.newPassword, user.password_hash)) {
+    throw new BadRequestError(
+      "Your new password must be different from the current one."
+    );
+  }
+
+  const passwordHash = await hashPassword(input.newPassword);
   const pool = getPool();
-  const { rows } = await pool.query<{
-    company_name: string | null;
-    company_description: string | null;
-  }>(`select company_name, company_description from users where id::text = $1`, [
-    tenantId,
+  await pool.query(`update users set password_hash = $2 where id = $1`, [
+    userId,
+    passwordHash,
   ]);
-  if (!rows[0]) return null;
-  return { name: rows[0].company_name, description: rows[0].company_description };
+  // Revoke first, then issue: the caller gets the only surviving session.
+  await pool.query(
+    `update refresh_tokens set revoked_at = now()
+      where user_id = $1 and revoked_at is null`,
+    [userId]
+  );
+
+  return buildSession({ ...user, password_hash: passwordHash });
 }
 
+/** Personal details only. The company profile lives on the organization. */
 export async function updateProfile(
   userId: string,
-  patch: { name?: string; companyName?: string | null; companyDescription?: string | null }
+  patch: { name?: string }
 ): Promise<PublicUser> {
   if (patch.name !== undefined && patch.name.trim().length < 2) {
     throw new BadRequestError("Please enter your name.");
   }
   const pool = getPool();
   const { rows } = await pool.query<UserRow>(
-    `update users
-        set name = coalesce($2, name),
-            company_name = case when $3::boolean then $4 else company_name end,
-            company_description = case when $5::boolean then $6 else company_description end
-      where id = $1
-      returning *`,
-    [
-      userId,
-      patch.name?.trim() ?? null,
-      patch.companyName !== undefined,
-      patch.companyName?.trim() || null,
-      patch.companyDescription !== undefined,
-      patch.companyDescription?.trim() || null,
-    ]
+    `update users set name = coalesce($2, name) where id = $1 returning *`,
+    [userId, patch.name?.trim() ?? null]
   );
   if (!rows[0]) throw new UnauthorizedError("Account no longer exists.");
-  return toPublic(rows[0]);
+  const membership = await getMembershipForUser(userId);
+  return toPublic(rows[0], membership?.orgRole ?? null);
 }

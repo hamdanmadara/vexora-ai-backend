@@ -68,13 +68,15 @@ async function displayTimezone(sessionId?: string): Promise<string> {
   return env.SALES_TIMEZONE;
 }
 
-/** Whose calendar to read: the session's workspace owner. */
-async function resolveSalesRep(sessionId?: string): Promise<string> {
-  if (sessionId) {
-    const lead = await getLeadBySession(sessionId).catch(() => null);
-    if (lead) return lead.tenant_id;
-  }
-  return env.DEFAULT_SALES_REP_ID;
+/**
+ * Whose calendar to read: the session's workspace. Returns null when the
+ * session is unknown — we never fall back to a shared default rep, which
+ * would expose another organization's availability.
+ */
+async function resolveSalesRep(sessionId?: string): Promise<string | null> {
+  if (!sessionId) return null;
+  const lead = await getLeadBySession(sessionId).catch(() => null);
+  return lead?.tenant_id ?? null;
 }
 
 function formatSlot(iso: string, timeZone: string): string {
@@ -107,6 +109,9 @@ export const proposeSlotsTool = createTool({
       }
 
       const salesRepId = await resolveSalesRep(inputData.sessionId);
+      if (!salesRepId) {
+        return { slots: [], reason: "not_connected" as const };
+      }
       const raw = inputData.weekOf
         ? await proposeFreeSlotsForWeek({
             salesRepId,

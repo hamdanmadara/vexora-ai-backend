@@ -43,6 +43,29 @@ export function getPool(): pg.Pool {
   return _pool;
 }
 
+/**
+ * Run `fn` inside a single transaction, committing on success and rolling
+ * back on any throw. Needed wherever several rows must appear together or
+ * not at all — e.g. organization signup creates an org, a user and a
+ * membership, and a half-created workspace would be unusable.
+ */
+export async function withTransaction<T>(
+  fn: (client: pg.PoolClient) => Promise<T>
+): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+    const result = await fn(client);
+    await client.query("commit");
+    return result;
+  } catch (err) {
+    await client.query("rollback").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function closePool(): Promise<void> {
   if (_pool) {
     await _pool.end();
