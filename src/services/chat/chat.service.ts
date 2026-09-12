@@ -5,7 +5,7 @@ import {
 } from "@/services/lead/lead.service";
 import { env, featureFlags } from "@/config/env";
 import { FeatureDisabledError, NotFoundError } from "@/utils/errors";
-import { getCompanyProfile } from "@/services/auth/auth.service";
+import { getCompanyProfile } from "@/services/organization/organization.service";
 import { logger } from "@/utils/logger";
 import { isCalendarApiReady } from "@/services/google/oauth.service";
 import { routeToAgent } from "./router";
@@ -245,13 +245,12 @@ async function prepareLeadForTurn(
   meta: ReturnType<typeof parseLeadMeta>;
   offerCall: boolean;
 }> {
+  // Session hijack guard lives in the query itself: session_id is globally
+  // unique, so getOrCreateLead only returns a row when the session belongs to
+  // THIS workspace. A foreign id yields null and is reported as unknown, which
+  // never confirms that it exists elsewhere.
   let lead = await getOrCreateLead({ sessionId, tenantId, channel });
-
-  // Session hijack guard: getOrCreateLead upserts on session_id, so a caller
-  // presenting an id that already belongs to ANOTHER workspace gets back
-  // that workspace's lead. Refuse — same shape as an unknown session, so the
-  // response never confirms the id exists elsewhere.
-  if (lead.tenant_id !== tenantId) {
+  if (!lead) {
     throw new NotFoundError("Session not found");
   }
 

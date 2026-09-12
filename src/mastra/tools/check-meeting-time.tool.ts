@@ -54,13 +54,15 @@ async function displayTimezone(sessionId?: string): Promise<string> {
   return env.SALES_TIMEZONE;
 }
 
-/** Whose calendar to check: the session's workspace owner. */
-async function resolveSalesRep(sessionId?: string): Promise<string> {
-  if (sessionId) {
-    const lead = await getLeadBySession(sessionId).catch(() => null);
-    if (lead) return lead.tenant_id;
-  }
-  return env.DEFAULT_SALES_REP_ID;
+/**
+ * Whose calendar to act on: the session's workspace. Returns null when the
+ * session is unknown — we never fall back to a shared default rep, which
+ * would read or book against another organization's calendar.
+ */
+async function resolveSalesRep(sessionId?: string): Promise<string | null> {
+  if (!sessionId) return null;
+  const lead = await getLeadBySession(sessionId).catch(() => null);
+  return lead?.tenant_id ?? null;
 }
 
 function formatSlot(iso: string, timeZone: string): string {
@@ -91,6 +93,13 @@ export const checkMeetingTimeTool = createTool({
       const rejection = getSlotRejectionReason(start, end);
       const tz = await displayTimezone(inputData.sessionId);
       const salesRepId = await resolveSalesRep(inputData.sessionId);
+      if (!salesRepId) {
+        return {
+          available: false,
+          notConnected: true,
+          message: "Unknown chat session — cannot check the calendar.",
+        };
+      }
 
       if (rejection === "outside_hours") {
         const alternatives = await proposeFreeSlotsForWeek({

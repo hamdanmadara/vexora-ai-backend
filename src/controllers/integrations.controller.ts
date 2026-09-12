@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { featureFlags } from "@/config/env";
 import { FeatureDisabledError } from "@/utils/errors";
-import { authOf } from "@/middleware/require-auth";
+import { tenantOf } from "@/middleware/require-auth";
 import {
   deleteIntegration,
   listIntegrations,
@@ -27,8 +27,8 @@ export async function getIntegrations(
   res: Response
 ): Promise<void> {
   ensureReady();
-  const { userId } = authOf(req);
-  const connected = await listIntegrations(userId);
+  const tenantId = tenantOf(req);
+  const connected = await listIntegrations(tenantId);
   const catalog = Object.values(PROVIDERS).map((p) => ({
     id: p.id,
     name: p.name,
@@ -45,9 +45,9 @@ export async function putIntegration(
   res: Response
 ): Promise<void> {
   ensureReady();
-  const { userId } = authOf(req);
+  const tenantId = tenantOf(req);
   const integration = await upsertIntegration(
-    userId,
+    tenantId,
     String(req.params.provider ?? ""),
     (req.body ?? {}) as Record<string, unknown>
   );
@@ -60,8 +60,8 @@ export async function removeIntegration(
   res: Response
 ): Promise<void> {
   ensureReady();
-  const { userId } = authOf(req);
-  await deleteIntegration(userId, String(req.params.provider ?? ""));
+  const tenantId = tenantOf(req);
+  await deleteIntegration(tenantId, String(req.params.provider ?? ""));
   res.json({ ok: true });
 }
 
@@ -71,9 +71,9 @@ export async function postRotateWebhook(
   res: Response
 ): Promise<void> {
   ensureReady();
-  const { userId } = authOf(req);
+  const tenantId = tenantOf(req);
   const integration = await rotateWebhookToken(
-    userId,
+    tenantId,
     String(req.params.provider ?? "")
   );
   res.json({ integration });

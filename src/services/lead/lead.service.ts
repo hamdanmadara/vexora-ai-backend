@@ -21,15 +21,23 @@ export interface LeadRow {
   updated_at: string;
 }
 
-const DEFAULT_TENANT = "default";
-
+/**
+ * Find or create the lead for a session WITHIN a workspace.
+ *
+ * `session_id` is globally unique, so an upsert that ignored the tenant
+ * would hand back (and touch) another workspace's row. The DO UPDATE is
+ * therefore guarded on the tenant matching: presenting someone else's
+ * session id simply returns no row, which callers treat as "not found" —
+ * the check happens in the database rather than after the write.
+ *
+ * tenantId is REQUIRED: there is no ownerless workspace to fall back to.
+ */
 export async function getOrCreateLead(input: {
   sessionId: string;
-  tenantId?: string;
+  tenantId: string;
   channel?: string;
-}): Promise<LeadRow> {
+}): Promise<LeadRow | null> {
   const pool = getPool();
-  const tenantId = input.tenantId ?? DEFAULT_TENANT;
   const channel = input.channel ?? "web";
 
   const { rows } = await pool.query<LeadRow>(
@@ -37,10 +45,11 @@ export async function getOrCreateLead(input: {
        values ($1, $2, $3)
      on conflict (session_id) do update
        set updated_at = now()
+     where leads.tenant_id = excluded.tenant_id
      returning *`,
-    [tenantId, input.sessionId, channel]
+    [input.tenantId, input.sessionId, channel]
   );
-  return rows[0]!;
+  return rows[0] ?? null;
 }
 
 export async function getLeadBySession(sessionId: string): Promise<LeadRow | null> {

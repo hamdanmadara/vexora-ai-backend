@@ -9,7 +9,7 @@ import {
 } from "@/services/google/oauth.service";
 import { getGoogleCredentials } from "@/services/google/credentials.service";
 import { BadRequestError } from "@/utils/errors";
-import { authOf } from "@/middleware/require-auth";
+import { tenantOf } from "@/middleware/require-auth";
 import {
   signOAuthState,
   verifyOAuthState,
@@ -27,8 +27,8 @@ export async function startGoogleAuth(
   req: Request,
   res: Response
 ): Promise<void> {
-  const { userId } = authOf(req);
-  const url = buildAuthUrl(signOAuthState(userId));
+  const tenantId = tenantOf(req);
+  const url = buildAuthUrl(signOAuthState(tenantId));
   res.json({ url });
 }
 
@@ -55,8 +55,8 @@ export async function googleAuthCallback(
     if (!code) throw new BadRequestError("Missing OAuth code");
     if (!state) throw new BadRequestError("Missing OAuth state");
 
-    const userId = verifyOAuthState(state);
-    await handleOAuthCallback(code, userId);
+    const tenantId = verifyOAuthState(state);
+    await handleOAuthCallback(code, tenantId);
     res.redirect(`${settingsUrl}?google=connected`);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Connection failed";
@@ -74,8 +74,8 @@ export async function googleDisconnect(
   req: Request,
   res: Response
 ): Promise<void> {
-  const { userId } = authOf(req);
-  const removed = await disconnectGoogle(userId);
+  const tenantId = tenantOf(req);
+  const removed = await disconnectGoogle(tenantId);
   res.json({ ok: true, removed });
 }
 
@@ -89,10 +89,10 @@ export async function googleStatus(
   req: Request,
   res: Response
 ): Promise<void> {
-  const { userId } = authOf(req);
-  const connected = await isGoogleConnected(userId);
-  const creds = connected ? await getGoogleCredentials(userId) : null;
-  const calendarReady = connected ? await isCalendarApiReady(userId) : false;
+  const tenantId = tenantOf(req);
+  const connected = await isGoogleConnected(tenantId);
+  const creds = connected ? await getGoogleCredentials(tenantId) : null;
+  const calendarReady = connected ? await isCalendarApiReady(tenantId) : false;
   res.json({
     connected,
     calendarReady,

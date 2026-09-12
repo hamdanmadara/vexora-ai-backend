@@ -2,7 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { bookMeeting } from "@/services/google/calendar.service";
 import {
-  getOrCreateLead,
+  getLeadBySession,
   updateLead,
 } from "@/services/lead/lead.service";
 import { parseLeadMeta } from "@/services/chat/lead-meta";
@@ -60,7 +60,19 @@ export const bookMeetingTool = createTool({
     }
 
     try {
-      const lead = await getOrCreateLead({ sessionId: inputData.sessionId });
+      // Fail closed: the chat turn already created this session's lead, so a
+      // missing one means an unknown/foreign session. Never create one here —
+      // that used to mint an ownerless lead and book against no workspace.
+      const lead = await getLeadBySession(inputData.sessionId);
+      if (!lead) {
+        return {
+          ok: false,
+          meetLink: null,
+          startTime: null,
+          endTime: null,
+          error: "Unknown chat session.",
+        };
+      }
       const meta = parseLeadMeta(lead.notes);
       const { summary, description } = buildCalendarEventFields({
         attendeeName: inputData.attendeeName,
